@@ -1,15 +1,21 @@
 # .streamlit/config.toml
 
 [theme]
-primaryColor="#2E86C1" # A professional blue
-backgroundColor="#F0F2F6" # Light grey background
-secondaryBackgroundColor="#FFFFFF" # White for elements
-textColor="#262730" # Dark text for readability
+# Dark Mode Theme
+primaryColor="#00A0B0" # A vibrant teal for primary elements
+backgroundColor="#0E1117" # Very dark (almost black) for the main background
+secondaryBackgroundColor="#161A25" # Slightly lighter dark for element backgrounds
+textColor="#FAFAFA" # Light text for readability on dark backgrounds
 font="sans serif" # Standard sans-serif font
+
+# Light Mode Theme (kept for reference or if you want to switch)
+# primaryColor="#2E86C1" # A professional blue
+# backgroundColor="#F0F2F6" # Light grey background
+# secondaryBackgroundColor="#FFFFFF" # White for elements
+# textColor="#262730" # Dark text for readability
 
 [runner]
 # Enables faster development by automatically rerunning the script on change
-# This is often default behavior but can be explicitly set.
 fastReruns = true
 
 [server]
@@ -17,3 +23,8 @@ fastReruns = true
 # port = 8501
 # Headless mode for running in environments without a browser (e.g., CI/CD)
 # headless = false
+
+[logger]
+# Set log level to 'info' or 'debug' for more detailed output during development
+# Options: 'error', 'warning', 'info', 'debug'
+level = "info"
