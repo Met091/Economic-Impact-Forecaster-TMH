@@ -17,8 +17,8 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Forecaster Pro",
-    page_icon="📈",
+    page_title="Economic Impact Forecaster", # Updated Page Title
+    page_icon="📊", # Changed Page Icon
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -35,8 +35,7 @@ def load_css(file_name):
         st.error(f"🚨 An error occurred while loading CSS: {e}")
 
 # --- Load Custom CSS ---
-# Create a file named 'style.css' in the same directory as app.py
-# or in .streamlit/style.css and adjust path accordingly.
+# Assumes 'style.css' is in the same directory as app.py
 load_css("style.css")
 # --- End Custom CSS Loading ---
 
@@ -52,21 +51,19 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
             dt_object = pytz.utc.localize(dt_object)
         return dt_object.astimezone(target_tz).strftime(fmt)
     except Exception as e:
-        # Using st.error for critical errors, st.warning for less critical
         st.warning(f"⚠️ Time conversion issue for an event: {e}. Displaying as 'Invalid Time'.")
         return "Invalid Time"
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
-    # Placeholder for a logo - replace with your actual logo URL or path
-    st.image("https://placehold.co/300x100/0F1116/007BFF?text=Forecaster+Pro&font=roboto", use_column_width=True)
-    st.markdown("## ⚙️ Configuration Filters") # Using h2 for main sidebar title
-    st.markdown("---") # Visual separator
+    st.image("https://placehold.co/300x100/0F1116/007BFF?text=Impact+Forecaster&font=roboto", use_column_width=True) # Updated placeholder text
+    st.markdown("## ⚙️ Configuration Filters")
+    st.markdown("---")
 
-    st.subheader("🗓️ Date Range") # Using subheader for sections
+    st.subheader("🗓️ Date Range")
     today = date.today()
-    default_start_date = today - timedelta(days=today.weekday()) # Default to current week's Monday
-    default_end_date = default_start_date + timedelta(days=6) # Default to current week's Sunday
+    default_start_date = today - timedelta(days=today.weekday())
+    default_end_date = default_start_date + timedelta(days=6)
 
     if 'start_date_filter' not in st.session_state:
         st.session_state.start_date_filter = default_start_date
@@ -120,7 +117,7 @@ with st.sidebar:
     if not economic_df_master.empty and 'Currency' in economic_df_master.columns:
         available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
     else:
-        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] # Fallback
+        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"]
     currency_options = ["All"] + available_currencies
 
     if 'selected_currencies_filter' not in st.session_state:
@@ -173,13 +170,11 @@ with st.sidebar:
     else:
         st.caption("AV Key: 🔑 Configured")
     st.markdown("---")
-    # Using st.info for tips in the sidebar, which is styled by CSS
     st.markdown("<div class='custom-info-box' style='background-color: rgba(0,123,255,0.05); border-left-color: #00A0B0;'>Tip: Use filters to narrow events. Click an event below for analysis.</div>", unsafe_allow_html=True)
 
 
 # --- Application Title & Info ---
-st.title("📈 Economic Impact Forecaster Pro")
-# For more robust styling of the subtitle, wrap it.
+st.title("📊 Economic Impact Forecaster") # Updated Main Title and Icon
 st.markdown("<div class='app-subtitle'>Powered by <strong>Trading Mastery Hub</strong> | <em>Navigating Economic Tides with Data</em></div>", unsafe_allow_html=True)
 st.markdown("---")
 
@@ -277,7 +272,7 @@ else:
     inferred_outcome = infer_market_outlook_from_data(previous_val, forecast_val, event_name_str)
     st.markdown(f"<div class='custom-info-box'>System-Inferred Bias (Forecast vs. Previous): <strong>{inferred_outcome}</strong> for {currency_str}</div>", unsafe_allow_html=True)
 
-    st.markdown("<h5>Desired Market Scenario Analysis</h5>", unsafe_allow_html=True) # Using h5 for a slightly smaller sub-subheader
+    st.markdown("<h5>Desired Market Scenario Analysis</h5>", unsafe_allow_html=True)
     outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
     default_outcome_index = 2
     if inferred_outcome:
@@ -293,7 +288,6 @@ else:
     prediction_text_html = predict_actual_condition_for_outcome(previous_val, forecast_val, desired_outcome, currency_str, event_name_str)
     outcome_color_map_desired = {"Bullish": "#28a745", "Bearish": "#dc3545", "Consolidating": "#6c757d"}
     bg_color_desired = outcome_color_map_desired.get(desired_outcome, "#6c757d")
-    # Using a slightly different style for the prediction box border to match its background
     st.markdown(f"<div class='custom-prediction-box' style='background-color: {bg_color_desired}; border-left: 5px solid {bg_color_desired};'>{prediction_text_html}</div>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -356,7 +350,6 @@ else:
                 class_bg_color = nuanced_color_map.get(classification, "#333333")
 
                 st.markdown(f"**Classification Result:** <span style='background-color:{class_bg_color}; color:white; padding: 3px 7px; border-radius: 4px; font-weight:bold;'>{classification}</span>", unsafe_allow_html=True)
-                # Using a specific background for the classification explanation box
                 st.markdown(f"<div class='custom-classification-box' style='border-color: {class_bg_color}; background-color: #1c1e22;'>{explanation}</div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -379,7 +372,7 @@ else:
 
             st.dataframe(
                 calendar_display_df.sort_values(by='Time'),
-                use_container_width=True, hide_index=True, height=450, # Increased height
+                use_container_width=True, hide_index=True, height=450,
                 column_config={
                     "Time": st.column_config.TextColumn("Time", width="medium", help="Scheduled time in selected timezone"),
                     "Ccy": st.column_config.TextColumn("Ccy", width="small", help="Currency"),
@@ -388,7 +381,7 @@ else:
                     "Previous": st.column_config.NumberColumn("Prev.", format="%.2f", width="small", help="Previous actual value"),
                     "Forecast": st.column_config.NumberColumn("Fcst.", format="%.2f", width="small", help="Forecasted value"),
                     "Actual": st.column_config.NumberColumn("Actual", format="%.2f", width="small", help="Actual released value (if available)"),
-                    "Zone": st.column_config.TextColumn("Zone", width="small", help="Geographic zone"), # Adjusted width
+                    "Zone": st.column_config.TextColumn("Zone", width="small", help="Geographic zone"),
                 }
             )
         else:
