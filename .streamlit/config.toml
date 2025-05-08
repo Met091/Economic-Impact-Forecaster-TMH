@@ -1,30 +1,38 @@
 # .streamlit/config.toml
 
 [theme]
-# Dark Mode Theme
-primaryColor="#00A0B0" # A vibrant teal for primary elements
-backgroundColor="#0E1117" # Very dark (almost black) for the main background
-secondaryBackgroundColor="#161A25" # Slightly lighter dark for element backgrounds
-textColor="#FAFAFA" # Light text for readability on dark backgrounds
-font="sans serif" # Standard sans-serif font
+# Sleek Dark Mode Theme v1
+primaryColor="#007BFF"             # A standard, professional blue (Bootstrap Blue)
+backgroundColor="#0F1116"         # Slightly adjusted very dark background
+secondaryBackgroundColor="#1E2128" # Slightly adjusted darker secondary background
+textColor="#E0E0E0"               # Slightly off-white text for potentially softer contrast
+font="sans serif"                 # Standard sans-serif font (safe choice)
 
-# Light Mode Theme (kept for reference or if you want to switch)
-# primaryColor="#2E86C1" # A professional blue
-# backgroundColor="#F0F2F6" # Light grey background
-# secondaryBackgroundColor="#FFFFFF" # White for elements
-# textColor="#262730" # Dark text for readability
+# You can experiment with other primary colors too:
+# primaryColor="#546E7A" # Blue-Grey
+# primaryColor="#4A90E2" # Another professional blue shade
+# primaryColor="#008080" # Darker Teal
 
+# You could also try a different base font if preferred, though options are limited without CSS:
+# font="serif"
+# font="monospace"
+
+
+# --- Runner, Server, Logger settings remain the same ---
 [runner]
-# Enables faster development by automatically rerunning the script on change
 fastReruns = true
 
 [server]
-# Port for the Streamlit app (optional, Streamlit will pick one if not set)
 # port = 8501
-# Headless mode for running in environments without a browser (e.g., CI/CD)
 # headless = false
 
 [logger]
-# Set log level to 'info' or 'debug' for more detailed output during development
-# Options: 'error', 'warning', 'info', 'debug'
 level = "info"
+
+# --- Original Dark Mode Theme (for reference) ---
+# [theme]
+# primaryColor="#00A0B0" # A vibrant teal for primary elements
+# backgroundColor="#0E1117" # Very dark (almost black) for the main background
+# secondaryBackgroundColor="#161A25" # Slightly lighter dark for element backgrounds
+# textColor="#FAFAFA" # Light text for readability on dark backgrounds
+# font="sans serif" # Standard sans-serif font
