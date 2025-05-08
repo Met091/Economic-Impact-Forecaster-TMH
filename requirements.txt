@@ -1,6 +1,8 @@
+# updated_requirements.txt
 streamlit
 pandas
 numpy
 pytz
 altair
 investpy
+yfinance
