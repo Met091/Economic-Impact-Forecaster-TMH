@@ -1,258 +1,187 @@
-# data_loader.py
-import pandas as pd
+# strategy_engine.py
 import numpy as np
-import streamlit as st
-from datetime import datetime, timedelta, date
-import pytz 
-import investpy 
-import requests # For Alpha Vantage API calls
+import streamlit as st # Used only for potential error logging if needed
 
-# --- Alpha Vantage API Configuration ---
-ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query"
+# --- Indicator Configuration ---
+# Expanded with more absolute thresholds where appropriate
+NUANCED_MULTIPLIER = 2.0 
 
-def get_alpha_vantage_api_key():
-    """Retrieves the Alpha Vantage API key from Streamlit secrets."""
-    try:
-        return st.secrets["ALPHA_VANTAGE_API_KEY"]
-    except (KeyError, FileNotFoundError):
-        st.error("🚨 Alpha Vantage API key not found. Please add `ALPHA_VANTAGE_API_KEY = \"YOUR_KEY\"` to your Streamlit secrets (e.g., .streamlit/secrets.toml) to fetch real US historical data.")
-        return None
+INDICATOR_CONFIG = {
+    "Non-Farm Employment Change": { # USA NFP
+        "type": "normal", "unit": "K",
+        "significance_threshold_pct": 0.10, "buffer_pct": 0.05, 
+        "abs_significance": 30.0, "abs_buffer": 20.0 
+    },
+    "Employment Change": { # Assuming CAD Employment Change
+        "type": "normal", "unit": "K",
+        "significance_threshold_pct": 0.15, "buffer_pct": 0.10, 
+        "abs_significance": 7.0, "abs_buffer": 5.0 
+    },
+    "Unemployment Rate": { # Most countries
+        "type": "inverted", "unit": "%",
+        "significance_threshold_pct": 0.03, "buffer_pct": 0.02, 
+        "abs_significance": 0.1, "abs_buffer": 0.1 
+    },
+    "GDP m/m": { # Monthly GDP Growth
+        "type": "normal", "unit": "%",
+        "significance_threshold_pct": 0.20, "buffer_pct": 0.10, 
+        "abs_significance": 0.1, "abs_buffer": 0.1 # Small % changes matter
+    },
+     "GDP q/q": { # Quarterly GDP Growth
+        "type": "normal", "unit": "%",
+        "significance_threshold_pct": 0.15, "buffer_pct": 0.10, 
+        "abs_significance": 0.2, "abs_buffer": 0.2 
+    },
+    "Core CPI m/m": { # Monthly Core Inflation
+        "type": "normal", "unit": "%", # Treat higher as bullish (anticipating hikes)
+        "significance_threshold_pct": 0.10, "buffer_pct": 0.05, 
+        "abs_significance": 0.1, "abs_buffer": 0.1 
+    },
+     "CPI m/m": { # Monthly Headline Inflation
+        "type": "normal", "unit": "%",
+        "significance_threshold_pct": 0.10, "buffer_pct": 0.05, 
+        "abs_significance": 0.1, "abs_buffer": 0.1 
+    },
+    "Policy Rate": { # Generic for Interest Rate decisions (BoJ, Fed, ECB etc.)
+        "type": "normal", "unit": "%",
+        "significance_threshold_pct": 0.05, "buffer_pct": 0.02, 
+        "abs_significance": 0.15, "abs_buffer": 0.10 # Rate decisions often move in 0.25 steps, so buffer is smaller
+    },
+    "Retail Sales m/m": { # Monthly Retail Sales
+        "type": "normal", "unit": "%",
+        "significance_threshold_pct": 0.15, "buffer_pct": 0.10, 
+        "abs_significance": 0.3, "abs_buffer": 0.2 # Retail sales can be volatile
+    },
+    "PMI": { # Generic for PMI (Manufacturing, Services) - Threshold is often 50
+        "type": "normal", "unit": "", # PMI is an index level
+        "significance_threshold_pct": 0.02, "buffer_pct": 0.01, # ~1 point deviation is notable
+        "abs_significance": 1.0, "abs_buffer": 0.8 # Absolute buffer around forecast
+        # Special logic might be needed to compare against 50 boundary
+    },
+    "ECB President Speaks": {"type": "qualitative", "unit": ""}, 
+    "FOMC Press Conference": {"type": "qualitative", "unit": ""},
+    "Default": { # Fallback uses percentages
+        "type": "normal", "unit": "",
+        "significance_threshold_pct": 0.10, "buffer_pct": 0.05, 
+        "default_significance": 0.1, "default_buffer": 0.1 
+    } 
+}
 
-# --- investpy Data Fetching (Main Calendar) ---
-@st.cache_data(ttl=1800) 
-def fetch_economic_calendar_from_investpy(from_date_obj, to_date_obj):
-    # ... (fetch_economic_calendar_from_investpy function remains the same as V9) ...
-    if not isinstance(from_date_obj, date) or not isinstance(to_date_obj, date):
-        st.error("🚨 Invalid date objects provided to fetch_economic_calendar_from_investpy.")
-        return pd.DataFrame()
-    from_date_str = from_date_obj.strftime("%d/%m/%Y")
-    to_date_str = to_date_obj.strftime("%d/%m/%Y")
-    try:
-        df_investpy = investpy.economic_calendar(from_date=from_date_str, to_date=to_date_str)
-        if df_investpy.empty: return pd.DataFrame()
-        df = df_investpy.copy()
-        def create_timestamp(row):
-            try:
-                time_str = row['time']
-                if time_str == 'All Day' or pd.isna(time_str): time_str = '00:00'
-                datetime_str = f"{row['date']} {time_str}"
-                naive_dt = datetime.strptime(datetime_str, "%d/%m/%Y %H:%M")
-                return pytz.utc.localize(naive_dt)
-            except Exception: return pd.NaT
-        df['Timestamp'] = df.apply(create_timestamp, axis=1)
-        df.dropna(subset=['Timestamp'], inplace=True)
-        column_mapping = {'zone': 'Zone', 'currency': 'Currency', 'importance': 'Impact', 'event': 'EventName', 'actual': 'Actual', 'forecast': 'Forecast', 'previous': 'Previous'}
-        df.rename(columns=column_mapping, inplace=True)
-        impact_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}
-        if 'Impact' in df.columns: df['Impact'] = df['Impact'].map(impact_map).fillna('N/A')
-        else: df['Impact'] = 'N/A'
-        def clean_numeric_value(value):
-            if pd.isna(value) or value == ' ': return np.nan
-            if isinstance(value, (int, float)): return float(value)
-            text = str(value).strip().replace(' ', '').replace('$', '').replace('€', '').replace('£', '')
-            multiplier = 1
-            if 'K' in text.upper(): multiplier = 1000; text = text.upper().replace('K', '')
-            elif 'M' in text.upper(): multiplier = 1000000; text = text.upper().replace('M', '')
-            elif 'B' in text.upper(): multiplier = 1000000000; text = text.upper().replace('B', '')
-            text = text.replace('%', '')
-            try: return float(text) * multiplier
-            except ValueError: return np.nan
-        numeric_cols_investpy = ['Actual', 'Forecast', 'Previous']
-        for col in numeric_cols_investpy:
-            if col in df.columns: df[col] = df[col].apply(clean_numeric_value)
-            else: df[col] = np.nan
-        app_columns = ['id', 'Timestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast', 'Actual', 'Zone']
-        df_final = df[[col for col in app_columns if col in df.columns]].copy()
-        df_final['app_id'] = range(len(df_final))
-        return df_final.sort_values(by='Timestamp').reset_index(drop=True)
-    except RuntimeError as e: st.error(f"🚨 investpy Runtime Error: {e}."); return pd.DataFrame()
-    except ConnectionError as e: st.error(f"🚨 investpy Connection Error: {e}."); return pd.DataFrame()
-    except Exception as e: st.error(f"🚨 Unexpected error with investpy: {e}"); return pd.DataFrame()
-
-def load_economic_data(start_date, end_date):
-    if not start_date or not end_date:
-        st.error("🚨 Start date or end date not provided to load_economic_data.")
-        return pd.DataFrame()
-    df_investpy = fetch_economic_calendar_from_investpy(start_date, end_date)
-    if 'app_id' in df_investpy.columns: df_investpy.rename(columns={'app_id': 'id'}, inplace=True)
-    elif 'id' not in df_investpy.columns and not df_investpy.empty: df_investpy['id'] = range(len(df_investpy))
-    return df_investpy
-
-# --- Alpha Vantage Historical Data Fetching ---
-@st.cache_data(ttl=86400) # Cache Alpha Vantage historical data for 1 day
-def fetch_us_indicator_history_alphavantage(indicator_function_name, api_key, interval=None):
-    """
-    Fetches historical data for a specific US indicator from Alpha Vantage.
-    Returns a DataFrame with 'Date' (index) and 'Actual' value.
-    """
-    if not api_key:
-        return pd.DataFrame()
-
-    params = {
-        "function": indicator_function_name,
-        "apikey": api_key,
-        "datatype": "json" # JSON is easier to parse here
-    }
-    if interval and indicator_function_name in ["REAL_GDP", "CPI", "TREASURY_YIELD", "FEDERAL_FUNDS_RATE"]: # Add other functions that accept interval
-        params["interval"] = interval
-    
-    try:
-        response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
-
-        if "Note" in data and "Thank you for using Alpha Vantage!" in data["Note"]: # Rate limit message
-            st.warning(f"Alpha Vantage API rate limit likely reached. Please try again later. ({data['Note']})")
-            return pd.DataFrame()
-        if "Error Message" in data:
-            st.error(f"🚨 Alpha Vantage API Error for {indicator_function_name}: {data['Error Message']}")
-            return pd.DataFrame()
-        if not data or "data" not in data or not data["data"]:
-            # st.info(f"No historical data returned from Alpha Vantage for {indicator_function_name}.")
-            return pd.DataFrame()
-
-        hist_df = pd.DataFrame(data["data"])
-        if 'date' not in hist_df.columns or 'value' not in hist_df.columns:
-            # st.warning(f"Unexpected data format from Alpha Vantage for {indicator_function_name}. Missing 'date' or 'value'.")
-            return pd.DataFrame()
-            
-        hist_df['Date'] = pd.to_datetime(hist_df['date'])
-        hist_df['Actual'] = pd.to_numeric(hist_df['value'], errors='coerce')
-        hist_df.set_index('Date', inplace=True)
-        hist_df = hist_df[['Actual']].dropna().sort_index() # Keep only 'Actual', drop NaNs, sort
-        
-        # For indicators like NFP, Alpha Vantage values are in thousands.
-        # Our sample data for NFP was also in thousands (e.g., 175.0 for 175K).
-        # No explicit unit conversion needed here if AV also provides it in K.
-        # If AV provides full numbers, then divide by 1000 for NFP.
-        # For now, assume values are directly comparable or in the expected unit.
-
-        return hist_df
-    except requests.exceptions.RequestException as e:
-        st.error(f"🚨 API Request Error fetching historical data from Alpha Vantage for {indicator_function_name}: {e}")
-        return pd.DataFrame()
-    except ValueError as e: 
-        st.error(f"🚨 Error decoding Alpha Vantage API response for {indicator_function_name}: {e}")
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"🚨 Unexpected error with Alpha Vantage historical data for {indicator_function_name}: {e}")
-        return pd.DataFrame()
-
-# --- Load Historical Data (Main Function) ---
-# No @st.cache_data on this main loader, caching is on the fetch_ function
-def load_historical_data(event_name):
-    """
-    Loads historical data. Tries Alpha Vantage for supported US indicators,
-    otherwise falls back to sample data.
-    """
-    api_key = get_alpha_vantage_api_key()
-    av_df = pd.DataFrame()
-
-    # Map app event names to Alpha Vantage function names and required intervals
-    event_to_av_map = {
-        "Non-Farm Employment Change": {"function": "NONFARM_PAYROLL", "interval": None}, # Monthly by default
-        "Unemployment Rate": {"function": "UNEMPLOYMENT", "interval": None}, # Monthly by default
-        "Core CPI m/m": {"function": "CPI", "interval": "monthly"}, # AV provides general CPI
-        "Retail Sales m/m": {"function": "RETAIL_SALES", "interval": None}, # Monthly by default
-        "Real GDP": {"function": "REAL_GDP", "interval": "quarterly"}, # Or annual
-        # Add more mappings here
-    }
-
-    matched_av_indicator = None
-    for key_event, av_params in event_to_av_map.items():
-        if key_event.lower() in event_name.lower():
-            matched_av_indicator = av_params
-            break
-            
-    if matched_av_indicator and api_key:
-        # st.caption(f"Attempting to fetch real historical data for {event_name} from Alpha Vantage...")
-        av_df = fetch_us_indicator_history_alphavantage(
-            matched_av_indicator["function"], 
-            api_key,
-            interval=matched_av_indicator.get("interval")
-        )
-        if not av_df.empty:
-            # Alpha Vantage typically provides 'Actual'. We might not have 'Forecast' or 'Previous' for these historical points.
-            # The plotting function expects 'Actual', 'Forecast', 'Previous'.
-            # We will return only 'Actual' from AV, and the plot function can adapt or show only 'Actual'.
-            # Or, we can create dummy Forecast/Previous if needed for consistent plotting.
-            # For now, just return the DataFrame with 'Actual'.
-            return av_df # Contains 'Actual' column, Date index
-
-    # Fallback to sample data if Alpha Vantage fails or event not mapped
-    if av_df.empty:
-        # st.caption(f"Using sample historical data for {event_name}.")
-        pass # Message will be in app.py
-
-    # --- Sample Historical Data (Fallback) ---
-    today_date = datetime.now().date()
-    sample_historical_data = {
-        "Non-Farm Employment Change": pd.DataFrame({
-            'Date': [today_date - timedelta(days=30*i) for i in range(12, 0, -1)], # More data points
-            'Actual': [187.0, 150.0, 275.0, 216.0, 353.0, 175.0, 200.0, 220.0, 180.0, 190.0, 210.0, 205.0],
-            'Forecast': [170.0, 180.0, 190.0, 175.0, 185.0, 200.0, 190.0, 210.0, 185.0, 195.0, 200.0, 200.0],
-            'Previous': [165.0, 187.0, 150.0, 275.0, 216.0, 353.0, 175.0, 200.0, 220.0, 180.0, 190.0, 210.0]
-        }),
-        "Unemployment Rate": pd.DataFrame({
-            'Date': [today_date - timedelta(days=30*i) for i in range(12, 0, -1)],
-            'Actual': [3.8, 3.9, 3.7, 3.7, 3.7, 3.9, 3.6, 3.8, 3.7, 3.9, 3.8, 3.7],
-            'Forecast': [3.8, 3.8, 3.8, 3.7, 3.8, 3.9, 3.7, 3.8, 3.7, 3.8, 3.8, 3.8],
-            'Previous': [3.7, 3.8, 3.9, 3.7, 3.7, 3.7, 3.8, 3.6, 3.8, 3.7, 3.9, 3.8]
-        }),
-         "Core CPI m/m": pd.DataFrame({ # Sample data for Core CPI
-            'Date': [today_date - timedelta(days=30*i) for i in range(12, 0, -1)],
-            'Actual': [0.3, 0.4, 0.4, 0.3, 0.3, 0.3, 0.2, 0.4, 0.3, 0.5, 0.3, 0.2],
-            'Forecast': [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.4, 0.3, 0.4, 0.3, 0.3],
-            'Previous': [0.2, 0.3, 0.4, 0.4, 0.3, 0.3, 0.3, 0.2, 0.4, 0.3, 0.5, 0.3]
-        }),
-        "Retail Sales m/m": pd.DataFrame({ # Sample data for Retail Sales
-            'Date': [today_date - timedelta(days=30*i) for i in range(12, 0, -1)],
-            'Actual': [0.7, -0.8, 0.4, 0.9, -1.1, 0.6, 0.3, 0.5, -0.3, 0.8, 0.1, 0.0],
-            'Forecast': [0.4, -0.5, 0.5, 0.6, -0.8, 0.5, 0.2, 0.4, -0.2, 0.6, 0.2, 0.1],
-            'Previous': [-0.2, 0.7, -0.8, 0.4, 0.9, -1.1, 0.6, 0.3, 0.5, -0.3, 0.8, 0.1]
-        })
-    }
-    for key_event, df_sample in sample_historical_data.items():
-        if key_event.lower() in event_name.lower():
-            df = df_sample.copy()
-            df['Date'] = pd.to_datetime(df['Date'])
-            df.set_index('Date', inplace=True)
-            return df # Returns 'Actual', 'Forecast', 'Previous'
-    return pd.DataFrame()
+def get_indicator_properties(event_name):
+    """Fetches properties, prioritizing more specific matches."""
+    best_match_key = "Default"
+    max_match_len = 0
+    # Find the most specific matching key (longest common substring)
+    event_name_lower = event_name.lower()
+    for key in INDICATOR_CONFIG:
+        key_lower = key.lower()
+        if key_lower in event_name_lower:
+            # Prioritize longer keys if multiple match (e.g., "Core CPI m/m" vs "CPI m/m")
+            if len(key_lower) > max_match_len:
+                max_match_len = len(key_lower)
+                best_match_key = key
+        # Allow partial match for generic terms like "Policy Rate" or "PMI"
+        elif key_lower == "policy rate" and "rate" in event_name_lower and "unemployment" not in event_name_lower:
+             if len(key_lower) > max_match_len:
+                max_match_len = len(key_lower)
+                best_match_key = key
+        elif key_lower == "pmi" and "pmi" in event_name_lower:
+             if len(key_lower) > max_match_len:
+                max_match_len = len(key_lower)
+                best_match_key = key
 
 
-if __name__ == '__main__':
-    # Test investpy calendar
-    today = date.today()
-    start_test_date = today - timedelta(days=today.weekday()) 
-    end_test_date = start_test_date + timedelta(days=6)     
-    print(f"Fetching investpy calendar for: {start_test_date.strftime('%d/%m/%Y')} to {end_test_date.strftime('%d/%m/%Y')}")
-    calendar_data = load_economic_data(start_test_date, end_test_date)
-    if not calendar_data.empty: print("\nInvestpy Calendar Data Sample:\n", calendar_data.head())
-    else: print("\nFailed to load investpy calendar data.")
+    return INDICATOR_CONFIG[best_match_key].copy()
 
-    # Test Alpha Vantage historical data
-    print("\n--- Testing Alpha Vantage Historical Data ---")
-    # Mock st.secrets for local test if needed:
-    # class MockSecretsAV:
-    #     def __getitem__(self, key):
-    #         if key == "ALPHA_VANTAGE_API_KEY":
-    #             return "YOUR_AV_KEY_FOR_LOCAL_TEST" 
-    #         raise KeyError(key)
-    # st.secrets = MockSecretsAV()
-    
-    nfp_hist_av = load_historical_data("Non-Farm Employment Change")
-    if not nfp_hist_av.empty: print("\nNFP Historical Data (from AV if key valid, else sample):\n", nfp_hist_av.head())
-    else: print("\nNFP Historical Data: Empty or failed to load.")
-    
-    cpi_hist_av = load_historical_data("Core CPI m/m")
-    if not cpi_hist_av.empty: print("\nCPI Historical Data (from AV if key valid, else sample):\n", cpi_hist_av.head())
-    else: print("\nCPI Historical Data: Empty or failed to load.")
+def _calculate_threshold(value, pct_threshold, abs_threshold, default_abs_threshold):
+    """Helper to calculate threshold, prioritizing absolute value."""
+    # Use absolute threshold if it's provided and not None
+    if abs_threshold is not None:
+        return abs_threshold # Use absolute value directly
+    # Else, if value is non-zero and percentage threshold is provided
+    elif value != 0 and pct_threshold is not None:
+        return abs(value * pct_threshold)
+    # Fallback to default absolute threshold
+    else:
+        return default_abs_threshold
 
-    gdp_hist_av = load_historical_data("Real GDP") # Example of another mapped indicator
-    if not gdp_hist_av.empty: print("\nReal GDP Historical Data (from AV if key valid, else sample):\n", gdp_hist_av.head())
-    else: print("\nReal GDP Historical Data: Empty or failed to load.")
+# --- infer_market_outlook_from_data ---
+def infer_market_outlook_from_data(previous, forecast, event_name):
+    # ... (Function remains the same as V13, uses _calculate_threshold) ...
+    props = get_indicator_properties(event_name)
+    if props["type"] == "qualitative": return "Consolidating (Qualitative)"
+    if forecast is None or np.isnan(forecast) or previous is None or np.isnan(previous): return "Consolidating (Insufficient Data)"
+    try: prev_val, fcst_val = float(previous), float(forecast)
+    except ValueError: return "Consolidating (Invalid Data)"
+    significance_threshold = _calculate_threshold(prev_val, props.get("significance_threshold_pct"), props.get("abs_significance"), props.get("default_significance", INDICATOR_CONFIG["Default"]["default_significance"]))
+    deviation = fcst_val - prev_val
+    if abs(deviation) < significance_threshold: return "Consolidating"
+    is_bullish_deviation = deviation > 0
+    if props["type"] == "inverted": return "Bullish" if not is_bullish_deviation else "Bearish"
+    else: return "Bullish" if is_bullish_deviation else "Bearish"
 
-    unmapped_hist = load_historical_data("Some Unmapped Event") # Should use sample or be empty
-    if not unmapped_hist.empty: print("\nUnmapped Event Historical Data (should be sample if defined, else empty):\n", unmapped_hist.head())
-    else: print("\nUnmapped Event Historical Data: Empty (as expected if no sample).")
+# --- predict_actual_condition_for_outcome ---
+def predict_actual_condition_for_outcome(previous, forecast, desired_outcome, currency, event_name):
+    # ... (Function remains the same as V13, uses _calculate_threshold) ...
+    props = get_indicator_properties(event_name)
+    unit = props.get("unit", "")
+    if props["type"] == "qualitative":
+        if desired_outcome == "Bullish": return (f"For a **Bullish** outcome for {currency} from '{event_name}', the speech/announcement would need hawkish rhetoric...")
+        elif desired_outcome == "Bearish": return (f"For a **Bearish** outcome for {currency} from '{event_name}', the speech/announcement would need dovish rhetoric...")
+        else: return (f"For a **Consolidating/Neutral** outcome for {currency} from '{event_name}', the speech/announcement would need to be in line with expectations...")
+    if forecast is None or np.isnan(forecast): return (f"Cannot provide quantitative interpretation for '{event_name}' ({currency}): 'Forecast' data unavailable.")
+    try: forecast_val = float(forecast)
+    except ValueError: return (f"Forecast value '{forecast}' for '{event_name}' ({currency}) is invalid.")
+    buffer = _calculate_threshold(forecast_val, props.get("buffer_pct"), props.get("abs_buffer"), props.get("default_buffer", INDICATOR_CONFIG["Default"]["default_buffer"]))
+    outcome_description = ""; indicator_nature_desc = "lower is better" if props['type'] == 'inverted' else "higher is better"; strong_buffer = buffer * NUANCED_MULTIPLIER
+    if desired_outcome == "Bullish":
+        if props["type"] == "inverted": mild_beat, strong_beat = forecast_val - buffer, forecast_val - strong_buffer; outcome_description = (f"For a **Bullish** outcome for {currency} from '{event_name}' ({indicator_nature_desc}), Actual < {forecast_val:.2f}{unit}. (e.g., Mildly Bullish if ~{mild_beat:.2f}{unit}, Strongly Bullish if ≤ {strong_beat:.2f}{unit})")
+        else: mild_beat, strong_beat = forecast_val + buffer, forecast_val + strong_buffer; outcome_description = (f"For a **Bullish** outcome for {currency} from '{event_name}' ({indicator_nature_desc}), Actual > {forecast_val:.2f}{unit}. (e.g., Mildly Bullish if ~{mild_beat:.2f}{unit}, Strongly Bullish if ≥ {strong_beat:.2f}{unit})")
+    elif desired_outcome == "Bearish":
+        if props["type"] == "inverted": mild_miss, strong_miss = forecast_val + buffer, forecast_val + strong_buffer; outcome_description = (f"For a **Bearish** outcome for {currency} from '{event_name}' ({indicator_nature_desc}), Actual > {forecast_val:.2f}{unit}. (e.g., Mildly Bearish if ~{mild_miss:.2f}{unit}, Strongly Bearish if ≥ {strong_miss:.2f}{unit})")
+        else: mild_miss, strong_miss = forecast_val - buffer, forecast_val - strong_buffer; outcome_description = (f"For a **Bearish** outcome for {currency} from '{event_name}' ({indicator_nature_desc}), Actual < {forecast_val:.2f}{unit}. (e.g., Mildly Bearish if ~{mild_miss:.2f}{unit}, Strongly Bearish if ≤ {strong_miss:.2f}{unit})")
+    elif desired_outcome == "Consolidating": lower_bound, upper_bound = forecast_val - buffer, forecast_val + buffer; outcome_description = (f"For a **Consolidating/Neutral** outcome for {currency} from '{event_name}', Actual ≈ {forecast_val:.2f}{unit} (e.g., between {lower_bound:.2f}{unit} and {upper_bound:.2f}{unit}).")
+    else: return "Invalid desired outcome selected."
+    if previous is not None and not np.isnan(previous) and outcome_description:
+        prev_val = float(previous)
+        if desired_outcome == "Bullish": forecast_improves = (props["type"] == "inverted" and forecast_val < prev_val) or (props["type"] == "normal" and forecast_val > prev_val); outcome_description += (f" Context: Forecast ({forecast_val:.2f}{unit}) already suggests {'improvement' if forecast_improves else 'worsening'} from Previous ({prev_val:.2f}{unit}).")
+        elif desired_outcome == "Bearish": forecast_worsens = (props["type"] == "inverted" and forecast_val > prev_val) or (props["type"] == "normal" and forecast_val < prev_val); outcome_description += (f" Context: Forecast ({forecast_val:.2f}{unit}) already suggests {'worsening' if forecast_worsens else 'improvement'} from Previous ({prev_val:.2f}{unit}).")
+        elif desired_outcome == "Consolidating":
+             if abs(prev_val - forecast_val) < (buffer * 0.1): outcome_description += (f" Context: Forecast ({forecast_val:.2f}{unit}) is very close to Previous ({prev_val:.2f}{unit}).")
+    return outcome_description
+
+# --- classify_actual_release ---
+def classify_actual_release(actual_value, forecast_value, previous_value, event_name, currency):
+    # ... (Function remains the same as V13, uses _calculate_threshold for buffer) ...
+    props = get_indicator_properties(event_name); unit = props.get("unit", "")
+    if props["type"] == "qualitative": return "Qualitative", f"'{event_name}' is qualitative..."
+    if actual_value is None or np.isnan(actual_value): return "Indeterminate", f"Actual value missing..."
+    if forecast_value is None or np.isnan(forecast_value): return "Indeterminate", f"Forecast value missing..."
+    try: actual, forecast = float(actual_value), float(forecast_value)
+    except ValueError: return "Error", f"Invalid numeric input..."
+    buffer = _calculate_threshold(forecast, props.get("buffer_pct"), props.get("abs_buffer"), props.get("default_buffer", INDICATOR_CONFIG["Default"]["default_buffer"]))
+    strong_buffer = buffer * NUANCED_MULTIPLIER; deviation = actual - forecast
+    classification = "Neutral/In-Line"; is_inverted = props["type"] == "inverted"
+    if is_inverted:
+        if deviation <= -strong_buffer: classification = "Strongly Bullish"
+        elif deviation < -buffer: classification = "Mildly Bullish"
+        elif deviation >= strong_buffer: classification = "Strongly Bearish"
+        elif deviation > buffer: classification = "Mildly Bearish"
+    else:
+        if deviation >= strong_buffer: classification = "Strongly Bullish"
+        elif deviation > buffer: classification = "Mildly Bullish"
+        elif deviation <= -strong_buffer: classification = "Strongly Bearish"
+        elif deviation < -buffer: classification = "Mildly Bearish"
+    prev_text = f", Previous: {float(previous_value):.2f}{unit}" if previous_value is not None and not np.isnan(previous_value) else ""
+    explanation = (f"Event: '{event_name}' ({currency}, type: {props['type']}).\n"
+                   f"Actual: {actual:.2f}{unit}, Forecast: {forecast:.2f}{unit}{prev_text}.\n"
+                   f"Deviation (Actual - Fcst): {deviation:.2f}{unit}. Buffer: ±{buffer:.2f}{unit} (Strong: ±{strong_buffer:.2f}{unit}).\n"
+                   f"Outcome: **{classification}** for {currency}. ")
+    if "Strongly Bullish" in classification: explanation += f"Actual significantly {'below' if is_inverted else 'above'} forecast (beyond {NUANCED_MULTIPLIER}x buffer)."
+    elif "Mildly Bullish" in classification: explanation += f"Actual moderately {'below' if is_inverted else 'above'} forecast (beyond 1x buffer)."
+    elif "Strongly Bearish" in classification: explanation += f"Actual significantly {'above' if is_inverted else 'below'} forecast (beyond {NUANCED_MULTIPLIER}x buffer)."
+    elif "Mildly Bearish" in classification: explanation += f"Actual moderately {'above' if is_inverted else 'below'} forecast (beyond 1x buffer)."
+    else: explanation += "Actual is within the expected buffer range around the forecast."
+    return classification, explanation
+
+# --- (Optional: Add new test cases for added absolute thresholds) ---
