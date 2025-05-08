@@ -12,14 +12,14 @@ from strategy_engine import (
     infer_market_outlook_from_data,
     classify_actual_release,
     get_indicator_properties,
-    INDICATOR_CONFIG # Import for direct access if needed, though get_indicator_properties is preferred
+    INDICATOR_CONFIG 
 )
 from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Impact Forecaster V6 (Live Data)",
-    page_icon="📡",
+    page_title="Economic Impact Forecaster V7 (Simulated)",
+    page_icon="🧪",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -30,53 +30,30 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %H:%M %Z"):
         return "N/A"
     try:
         target_tz = pytz.timezone(target_tz_str)
-        if dt_object.tzinfo is None or dt_object.tzinfo.utcoffset(dt_object) is None: # Check if naive
-             # Finnhub data should be UTC. If somehow naive, assume UTC.
-            dt_object = pytz.utc.localize(dt_object)
+        # Data from data_loader is now UTC
+        if dt_object.tzinfo is None or dt_object.tzinfo.utcoffset(dt_object) is None: 
+             dt_object = pytz.utc.localize(dt_object) # Should already be UTC from data_loader
         return dt_object.astimezone(target_tz).strftime(fmt)
     except Exception as e:
-        # print(f"Time conversion error: {e} for {dt_object} to {target_tz_str}") # For debugging
         return "Invalid Time"
 
 # --- Load Data ---
-# This function now attempts to fetch from Finnhub
 economic_df_master = load_economic_data() 
 
 # --- Application Title ---
-st.title("📡 Economic Impact Forecaster V6 (Live Data)")
-
-# --- API Key Instructions ---
-# Check if data is empty, which might indicate an API key issue if load_economic_data tried to fetch
-if 'FINNHUB_API_KEY' not in st.secrets:
-    st.warning(
-        """
-        **Finnhub API Key Not Configured!**
-        To load live economic calendar data, please:
-        1. Get a free API key from [Finnhub](https://finnhub.io/register).
-        2. Create a file named `secrets.toml` in a `.streamlit` directory within your app's root folder.
-        3. Add your API key to `secrets.toml` like this:
-           ```toml
-           FINNHUB_API_KEY = "YOUR_ACTUAL_API_KEY"
-           ```
-        The application will attempt to use sample data or may show limited functionality until the API key is set up.
-        """
-    )
-elif economic_df_master.empty:
-     st.warning("No economic data loaded. This could be due to an API issue, no events in the current range, or an incorrect API key. Please check your Finnhub API key in Streamlit secrets and ensure Finnhub service is operational.")
-
-
+st.title("🧪 Economic Impact Forecaster V7 (Simulated Data)")
 st.markdown("""
 Select your timezone and currency preferences. Then, choose an economic event from the main area to analyze its potential impact, view historical trends, and simulate outcomes.
-**Calendar data is now fetched from Finnhub (free tier).**
+**Calendar data is currently SIMULATED for demonstration purposes.**
 """)
-
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
     st.header("⚙️ Configuration")
     st.subheader("🌐 Timezone")
     common_timezones = pytz.common_timezones
-    default_tz_sidebar = 'US/Eastern'
+    # Default to 'US/Eastern' or 'UTC'
+    default_tz_sidebar = 'US/Eastern' 
     if 'selected_timezone' not in st.session_state:
         st.session_state.selected_timezone = default_tz_sidebar
 
@@ -89,11 +66,10 @@ with st.sidebar:
     st.session_state.selected_timezone = selected_tz_name
 
     st.subheader("💱 Currency Filter")
-    # Populate available currencies from the loaded data, if any
     if not economic_df_master.empty:
         available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr)])
-    else:
-        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] # Fallback if no data
+    else: # Fallback if data loading somehow fails, though it shouldn't with sample data
+        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] 
 
     currency_options = ["All Currencies"] + available_currencies
     
@@ -115,32 +91,31 @@ if not economic_df_master.empty:
     else:
         economic_df_filtered = economic_df_master[economic_df_master['Currency'].isin(selected_currencies)].copy()
 else:
-    economic_df_filtered = pd.DataFrame() # Ensure it's an empty DF if master is empty
+    economic_df_filtered = pd.DataFrame() 
 
 # --- Main Application Area ---
-if economic_df_master.empty and 'FINNHUB_API_KEY' in st.secrets: # Master is empty despite API key being present
-    st.error("🚨 Failed to load any economic data from Finnhub, although an API key is configured. Please check the Finnhub service status or your API key validity.")
+if economic_df_master.empty: # Should not happen with sample data unless data_loader itself has an issue
+    st.error("🚨 Critical Error: Failed to load sample economic data. Application cannot proceed.")
 elif economic_df_filtered.empty:
-    st.warning("⚠️ No economic events match the selected filters in the sidebar or no data was loaded. Please adjust your Timezone or Currency selection, or check API key setup.")
+    st.warning("⚠️ No economic events match the selected filters in the sidebar. Please adjust your Timezone or Currency selection.")
 else:
     col_event_selection, col_event_details = st.columns([2, 3])
 
     with col_event_selection:
         st.subheader("🗓️ Select Economic Event")
-        # Ensure 'Timestamp' column exists and is datetime before applying conversion
         if 'Timestamp' in economic_df_filtered.columns and pd.api.types.is_datetime64_any_dtype(economic_df_filtered['Timestamp']):
             economic_df_filtered['display_name'] = economic_df_filtered.apply(
                 lambda row: (f"{convert_and_format_time(row['Timestamp'], selected_tz_name, '%Y-%m-%d %H:%M')} "
-                             f"({pytz.timezone(selected_tz_name).localize(datetime.now()).strftime('%Z')}) - " # Added for clarity
+                             f"({pytz.timezone(selected_tz_name).localize(datetime.now()).strftime('%Z')}) - "
                              f"{row.get('Currency','N/A')} - {row.get('EventName','Unknown Event')}")
                 if pd.notna(row.get('EventName')) else f"Invalid Event Data @ {convert_and_format_time(row.get('Timestamp'), selected_tz_name)}",
                 axis=1
             )
-        else: # Fallback if Timestamp column is missing or not datetime
+        else: 
             economic_df_filtered['display_name'] = economic_df_filtered.apply(
                 lambda row: f"Data Error - {row.get('Currency','N/A')} - {row.get('EventName','Unknown Event')}", axis=1
             )
-            st.error("Timestamp data is missing or in an incorrect format from the API.")
+            st.error("Timestamp data is missing or in an incorrect format in sample data.")
 
         event_options = economic_df_filtered['display_name'].tolist()
 
@@ -159,14 +134,13 @@ else:
 
     selected_event_row = economic_df_filtered[economic_df_filtered['display_name'] == selected_event_display_name].iloc[0]
     
-    previous_val = selected_event_row.get('Previous') # Use .get for safety
+    previous_val = selected_event_row.get('Previous')
     forecast_val = selected_event_row.get('Forecast')
     event_name_str = str(selected_event_row.get('EventName', 'N/A'))
     currency_str = str(selected_event_row.get('Currency', 'N/A'))
     impact_str = str(selected_event_row.get('Impact', 'N/A'))
     event_timestamp = selected_event_row.get('Timestamp')
     formatted_event_time = convert_and_format_time(event_timestamp, selected_tz_name)
-
 
     with col_event_details:
         st.subheader(f"🔍 Details for: {event_name_str}")
@@ -186,16 +160,12 @@ else:
     st.markdown("---")
     tab1, tab2, tab3 = st.tabs(["🎯 Interpretation & Outlook", "📈 Historical Trends (Sample)", "🔬 Simulate Actual Release"])
 
-    # --- Tab 1: Interpretation ---
     with tab1:
-        # ... (rest of tab1 logic - largely unchanged, ensure it handles potential None/NaN from API)
         inferred_outcome = infer_market_outlook_from_data(
             previous_val, forecast_val, event_name_str
         )
         st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
-
         st.subheader("📊 Desired Market Outcome Analysis")
-        # ... (radio button and prediction text display as before) ...
         outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
         try:
             default_outcome_index = 2 
@@ -208,7 +178,6 @@ else:
             options=outcome_options_list, index=default_outcome_index,
             key=f"outcome_radio_main_{selected_event_row['id']}", horizontal=True
         )
-
         prediction_text = predict_actual_condition_for_outcome(
             previous_val, forecast_val, desired_outcome, currency_str, event_name_str
         )
@@ -219,11 +188,9 @@ else:
         bg_color = outcome_color_map.get(desired_outcome, "#333333")
         st.markdown(f"<div style='background-color: {bg_color}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
 
-
-    # --- Tab 2: Historical Trends ---
     with tab2:
         st.header(f"Historical Trends for: {event_name_str}")
-        st.caption("Note: Historical data below is still sample data and not from the live API.")
+        st.caption("Note: Historical data below is sample data.")
         df_hist = load_historical_data(event_name_str) 
         if not df_hist.empty:
             indicator_props = get_indicator_properties(event_name_str)
@@ -231,9 +198,7 @@ else:
         else:
             st.info(f"No specific sample historical data found for '{event_name_str}'.")
 
-    # --- Tab 3: Simulate Actual ---
     with tab3:
-        # ... (rest of tab3 logic - largely unchanged) ...
         st.header(f"Simulate Actual Release Impact for: {event_name_str}")
         st.markdown("Enter a hypothetical 'Actual' value to see how it might be classified.")
         indicator_props_sim = get_indicator_properties(event_name_str)
@@ -257,23 +222,19 @@ else:
                 st.markdown(f"**Classification: <span style='color:{class_bg_color}; font-weight:bold;'>{classification}</span>**", unsafe_allow_html=True)
                 st.markdown(f"<div style='background-color: {class_bg_color}; color: #FAFAFA; padding: 10px; border-radius: 5px; border: 1px solid #4F4F4F; margin-top:5px;'>{explanation}</div>", unsafe_allow_html=True)
 
-
-    # --- Economic Calendar Overview in Main Area ---
     st.markdown("---")
-    with st.expander("🗓️ Full Economic Calendar Overview (Filtered - Live from Finnhub)", expanded=False):
+    with st.expander("🗓️ Full Economic Calendar Overview (Simulated Data)", expanded=False):
         if not economic_df_filtered.empty:
             calendar_display_df = economic_df_filtered.copy()
             if 'Timestamp' in calendar_display_df.columns and pd.api.types.is_datetime64_any_dtype(calendar_display_df['Timestamp']):
                 calendar_display_df['FormattedTimestamp'] = calendar_display_df['Timestamp'].apply(
                     lambda x: convert_and_format_time(x, selected_tz_name, "%Y-%m-%d %H:%M %Z")
                 )
-                # Select and rename columns for the final display
                 calendar_display_df = calendar_display_df[['FormattedTimestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast', 'Actual']]
                 calendar_display_df.rename(columns={'FormattedTimestamp': 'Time', 'EventName': 'Event Name'}, inplace=True)
-            else: # Fallback if timestamp issue
+            else: 
                 calendar_display_df['Time'] = "Data Error"
                 calendar_display_df = calendar_display_df[['Time', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast', 'Actual']]
-
 
             st.dataframe(
                 calendar_display_df,
@@ -289,10 +250,10 @@ else:
                 use_container_width=True, hide_index=True, height=400
             )
         else:
-            st.info("No events to display based on the current filters or data availability.")
+            st.info("No events to display based on the current filters.")
 
     st.markdown("---")
     st.caption("""
-    **Disclaimer:** Generalized interpretations, not financial advice. Calendar data from Finnhub (free tier). Historical data is sample.
-    Timezone conversion relies on `pytz`. API data accuracy/availability depends on Finnhub.
+    **Disclaimer:** Generalized interpretations, not financial advice. All calendar and historical data is SIMULATED.
+    Timezone conversion relies on `pytz`.
     """)
