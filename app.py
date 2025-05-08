@@ -7,7 +7,7 @@ from datetime import datetime
 
 from data_loader import load_economic_data, load_historical_data
 from strategy_engine import (
-    predict_actual_condition_for_outcome, 
+    predict_actual_condition_for_outcome,
     infer_market_outlook_from_data,
     classify_actual_release,
     get_indicator_properties
@@ -16,8 +16,8 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Impact Forecaster V4",
-    page_icon="🕰️",
+    page_title="Economic Impact Forecaster V5",
+    page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -29,68 +29,50 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %H:%M %Z"):
         return "N/A"
     try:
         target_tz = pytz.timezone(target_tz_str)
-        # If dt_object is naive, assume it's UTC (or handle as error/default)
-        # However, data_loader should now provide timezone-aware objects.
         if dt_object.tzinfo is None:
-             # This case should ideally not happen if data_loader is correct
-            dt_object = pytz.utc.localize(dt_object) 
+            dt_object = pytz.utc.localize(dt_object)
         return dt_object.astimezone(target_tz).strftime(fmt)
-    except Exception as e:
-        # st.error(f"Error converting time: {e}") # Avoid flooding UI with errors
-        # print(f"Error converting time: {dt_object} to {target_tz_str} - {e}")
+    except Exception:
         return "Invalid Time"
 
-
 # --- Load Data ---
+# This is cached in data_loader.py
 economic_df_master = load_economic_data()
 
 # --- Application Title ---
-st.title("🕰️ Economic Impact Forecaster V4")
+st.title("📈 Economic Impact Forecaster V5")
 st.markdown("""
-Select your timezone, filter by currency, analyze economic data releases, view historical trends, and simulate impacts.
+Select your timezone and currency preferences. Then, choose an economic event from the main area to analyze its potential impact, view historical trends, and simulate outcomes.
 """)
 
-# --- Main Application Logic ---
-if economic_df_master.empty:
-    st.error("🚨 Failed to load economic data. Please check `data_loader.py` or the data source.")
-else:
-    # --- Sidebar ---
-    st.sidebar.header("⚙️ Configuration")
+# --- Sidebar for Configuration ---
+with st.sidebar:
+    st.header("⚙️ Configuration")
 
     # --- Timezone Selection ---
-    st.sidebar.subheader("🌐 Timezone")
+    st.subheader("🌐 Timezone")
     common_timezones = pytz.common_timezones
-    # Try to guess user's local timezone or default to UTC / US/Eastern
-    default_tz = 'UTC'
-    try:
-        # This is a browser-dependent feature and might not always work.
-        # It's also not directly available in Streamlit's Python backend.
-        # For a robust solution, would need JavaScript or a user profile setting.
-        # Defaulting to a common one like UTC or 'US/Eastern'.
-        if 'selected_timezone' not in st.session_state:
-            st.session_state.selected_timezone = 'US/Eastern' # Or 'UTC'
-    except Exception:
-        st.session_state.selected_timezone = 'US/Eastern'
+    default_tz_sidebar = 'US/Eastern'
+    if 'selected_timezone' not in st.session_state:
+        st.session_state.selected_timezone = default_tz_sidebar
 
-    selected_tz_name = st.sidebar.selectbox(
+    selected_tz_name = st.selectbox(
         "Select Display Timezone:",
         options=common_timezones,
-        index=common_timezones.index(st.session_state.selected_timezone) if st.session_state.selected_timezone in common_timezones else common_timezones.index('US/Eastern'),
-        key="selected_timezone_widget" # Use a distinct key if needed
+        index=common_timezones.index(st.session_state.selected_timezone) if st.session_state.selected_timezone in common_timezones else common_timezones.index(default_tz_sidebar),
+        key="selected_timezone_widget"
     )
-    # Update session state if changed by widget
     st.session_state.selected_timezone = selected_tz_name
 
-
     # --- Currency Filter ---
-    st.sidebar.subheader("💱 Currency Filter")
+    st.subheader("💱 Currency Filter")
     available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr)])
     currency_options = ["All Currencies"] + available_currencies
     
     if 'selected_currencies_filter' not in st.session_state:
         st.session_state.selected_currencies_filter = ["All Currencies"]
 
-    selected_currencies = st.sidebar.multiselect(
+    selected_currencies = st.multiselect(
         "Select Currencies:",
         options=currency_options,
         default=st.session_state.selected_currencies_filter,
@@ -98,195 +80,168 @@ else:
     )
     st.session_state.selected_currencies_filter = selected_currencies
 
+# --- Filter DataFrame based on selected currencies ---
+if "All Currencies" in selected_currencies or not selected_currencies:
+    economic_df_filtered = economic_df_master.copy()
+else:
+    economic_df_filtered = economic_df_master[economic_df_master['Currency'].isin(selected_currencies)].copy()
 
-    # Filter DataFrame based on selected currencies
-    if "All Currencies" in selected_currencies or not selected_currencies:
-        economic_df_filtered = economic_df_master.copy()
-    else:
-        economic_df_filtered = economic_df_master[economic_df_master['Currency'].isin(selected_currencies)].copy()
+# --- Main Application Area ---
+if economic_df_master.empty:
+    st.error("🚨 Critical Error: Failed to load master economic data. Application cannot proceed.")
+elif economic_df_filtered.empty:
+    st.warning("⚠️ No economic events match the selected filters in the sidebar. Please adjust your Timezone or Currency selection.")
+else:
+    # --- Event Selection and Details in Main Area ---
+    col_event_selection, col_event_details = st.columns([2, 3]) # Adjust ratios as needed
 
-    st.sidebar.markdown("---")
-    st.sidebar.header("🗓️ Event Selection")
-
-    if economic_df_filtered.empty:
-        st.sidebar.warning("No events match the selected filters.")
-        st.error("No economic events found for the selected filters. Please adjust filters in the sidebar.")
-    else:
-        # Create a display name for the selectbox using the filtered DataFrame AND selected timezone
+    with col_event_selection:
+        st.subheader("🗓️ Select Economic Event")
         economic_df_filtered['display_name'] = economic_df_filtered.apply(
             lambda row: (f"{convert_and_format_time(row['Timestamp'], selected_tz_name, '%Y-%m-%d %H:%M')} "
-                         f"({pytz.timezone(selected_tz_name).localize(datetime.now()).strftime('%Z')}) - " # Show TZ abbreviation
+                         f"({pytz.timezone(selected_tz_name).localize(datetime.now()).strftime('%Z')}) - "
                          f"{row['Currency']} - {row['EventName']}")
             if pd.notna(row['Currency']) and pd.notna(row['EventName']) and pd.notna(row['Timestamp'])
             else f"Invalid Event Data",
             axis=1
         )
         event_options = economic_df_filtered['display_name'].tolist()
+
+        current_event_selection_key = "current_event_selectbox_main"
+        if current_event_selection_key not in st.session_state or st.session_state[current_event_selection_key] not in event_options:
+            st.session_state[current_event_selection_key] = event_options[0] if event_options else None
         
-        if not event_options:
-            st.sidebar.warning("No events available for selection with the current filters.")
-            st.error("No economic events available for selection. Please adjust the filters.")
+        selected_event_display_name = st.selectbox(
+            "Choose an event from the filtered list:",
+            options=event_options,
+            key=current_event_selection_key,
+            label_visibility="collapsed" # Hide label if st.subheader is enough
+        )
+
+    if selected_event_display_name is None:
+        st.error("🚨 No event selected or available with current filters.")
+        st.stop() # Halt execution if no event can be processed
+
+    selected_event_row = economic_df_filtered[economic_df_filtered['display_name'] == selected_event_display_name].iloc[0]
+    
+    # Prepare data for selected event
+    previous_val = selected_event_row['Previous']
+    forecast_val = selected_event_row['Forecast']
+    event_name_str = str(selected_event_row['EventName'])
+    currency_str = str(selected_event_row['Currency'])
+    formatted_event_time = convert_and_format_time(selected_event_row['Timestamp'], selected_tz_name)
+
+    with col_event_details:
+        st.subheader(f"🔍 Details for: {event_name_str}")
+        # Using metrics for a cleaner look
+        detail_col1, detail_col2, detail_col3 = st.columns(3)
+        with detail_col1:
+            st.metric(label="Currency", value=currency_str)
+            st.metric(label="Previous", value=f"{previous_val:.2f}" if pd.notna(previous_val) else "N/A")
+        with detail_col2:
+            st.metric(label="Impact", value=str(selected_event_row['Impact']))
+            st.metric(label="Forecast", value=f"{forecast_val:.2f}" if pd.notna(forecast_val) else "N/A")
+        with detail_col3:
+            st.metric(label="Scheduled Time", value=formatted_event_time.split(' ')[1] if formatted_event_time != "N/A" else "N/A") # Show only time part
+            st.caption(f"Date: {formatted_event_time.split(' ')[0]}" if formatted_event_time != "N/A" else "")
+
+
+    st.markdown("---") # Separator
+
+    # --- Tabs for Analysis ---
+    tab1, tab2, tab3 = st.tabs(["🎯 Interpretation & Outlook", "📈 Historical Trends", "🔬 Simulate Actual Release"])
+
+    with tab1:
+        # st.header(f"Interpretation for: {event_name_str} ({currency_str})") # Already in details
+        inferred_outcome = infer_market_outlook_from_data(
+            previous_val, forecast_val, event_name_str
+        )
+        st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
+
+        st.subheader("📊 Desired Market Outcome Analysis")
+        outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
+        try:
+            default_outcome_index = 2 
+            if "bullish" in inferred_outcome.lower(): default_outcome_index = 0
+            elif "bearish" in inferred_outcome.lower(): default_outcome_index = 1
+        except ValueError: default_outcome_index = 2 
+        
+        desired_outcome = st.radio(
+            f"Select desired outcome for {currency_str} to analyze:",
+            options=outcome_options_list, index=default_outcome_index,
+            key=f"outcome_radio_main_{selected_event_row['id']}", horizontal=True
+        )
+
+        prediction_text = predict_actual_condition_for_outcome(
+            previous_val, forecast_val, desired_outcome, currency_str, event_name_str
+        )
+        outcome_color_map = {
+            "Bullish": "#1E4620", "Bearish": "#541B1B", "Consolidating": "#333333",
+            "Qualitative": "#2E4053", "Indeterminate": "#4A235A", "Error": "#641E16"
+        }
+        bg_color = outcome_color_map.get(desired_outcome, "#333333")
+        st.markdown(f"<div style='background-color: {bg_color}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
+
+    with tab2:
+        st.header(f"Historical Trends for: {event_name_str}")
+        df_hist = load_historical_data(event_name_str) 
+        if not df_hist.empty:
+            indicator_props = get_indicator_properties(event_name_str)
+            plot_historical_trend(df_hist, event_name_str, indicator_props.get("type", "normal"))
         else:
-            # Manage selectbox state to avoid issues on filter changes
-            current_event_selection_key = "current_event_selectbox"
-            if current_event_selection_key not in st.session_state or st.session_state[current_event_selection_key] not in event_options:
-                st.session_state[current_event_selection_key] = event_options[0] if event_options else None
-            
-            selected_event_display_name = st.sidebar.selectbox(
-                "Select Economic Event:",
-                options=event_options,
-                key=current_event_selection_key
+            st.info(f"No specific historical data found for '{event_name_str}'.")
+
+    with tab3:
+        st.header(f"Simulate Actual Release Impact for: {event_name_str}")
+        st.markdown("Enter a hypothetical 'Actual' value to see how it might be classified.")
+        indicator_props_sim = get_indicator_properties(event_name_str)
+        unit_sim = indicator_props_sim.get("unit", "")
+        step_value = 0.1 if "%" in unit_sim else 1.0 if "K" in unit_sim else 0.01
+
+        if indicator_props_sim["type"] == "qualitative":
+             st.warning(f"'{event_name_str}' is a qualitative event. Numerical simulation is not applicable.")
+        else:
+            actual_input_val_default = forecast_val if pd.notna(forecast_val) else (previous_val if pd.notna(previous_val) else 0.0)
+            hypothetical_actual = st.number_input(
+                f"Enter Hypothetical 'Actual' Value ({unit_sim}):",
+                value=float(actual_input_val_default) if pd.notna(actual_input_val_default) else 0.0,
+                step=step_value, format="%.2f", key=f"actual_input_main_{selected_event_row['id']}"
             )
-            
-            if selected_event_display_name is None: # Should not happen if event_options is not empty
-                st.error("Error: No event selected.")
-                st.stop()
-
-            selected_event_row = economic_df_filtered[economic_df_filtered['display_name'] == selected_event_display_name].iloc[0]
-            
-            st.sidebar.markdown("---")
-            st.sidebar.subheader(f"Selected: {selected_event_row['EventName']}")
-            
-            # Display event time in selected timezone
-            formatted_event_time = convert_and_format_time(selected_event_row['Timestamp'], selected_tz_name)
-            st.sidebar.caption(f"Currency: {selected_event_row['Currency']} | Impact: {selected_event_row['Impact']} | Time: {formatted_event_time}")
-            
-            previous_val = selected_event_row['Previous']
-            forecast_val = selected_event_row['Forecast']
-            event_name_str = str(selected_event_row['EventName'])
-            currency_str = str(selected_event_row['Currency'])
-
-            st.sidebar.markdown(f"**Previous:** `{previous_val if pd.notna(previous_val) else 'N/A'}`")
-            st.sidebar.markdown(f"**Forecast:** `{forecast_val if pd.notna(forecast_val) else 'N/A'}`")
-
-            tab1, tab2, tab3 = st.tabs(["🔍 Interpretation & Outlook", "📈 Historical Trends", "🔬 Simulate Actual Release"])
-
-            with tab1:
-                st.header(f"🔍 Interpretation for: {event_name_str} ({currency_str})")
-                # ... (rest of tab1 logic unchanged, uses event_name_str, currency_str, etc.)
-                inferred_outcome = infer_market_outlook_from_data(
-                    previous_val,
-                    forecast_val,
-                    event_name_str
+            if st.button("Classify Hypothetical Actual", key=f"classify_btn_main_{selected_event_row['id']}", use_container_width=True):
+                classification, explanation = classify_actual_release(
+                    hypothetical_actual, forecast_val, previous_val, event_name_str, currency_str
                 )
-                st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
+                class_bg_color = outcome_color_map.get(classification, "#333333")
+                st.markdown(f"**Classification: <span style='color:{class_bg_color}; font-weight:bold;'>{classification}</span>**", unsafe_allow_html=True)
+                st.markdown(f"<div style='background-color: {class_bg_color}; color: #FAFAFA; padding: 10px; border-radius: 5px; border: 1px solid #4F4F4F; margin-top:5px;'>{explanation}</div>", unsafe_allow_html=True)
 
-                st.subheader("🎯 Desired Market Outcome Analysis")
-                outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
-                try:
-                    default_outcome_index = 2 
-                    if "bullish" in inferred_outcome.lower(): default_outcome_index = 0
-                    elif "bearish" in inferred_outcome.lower(): default_outcome_index = 1
-                except ValueError: 
-                    default_outcome_index = 2 
-                
-                desired_outcome = st.radio(
-                    f"Select desired outcome for {currency_str} to analyze:",
-                    options=outcome_options_list,
-                    index=default_outcome_index,
-                    key=f"outcome_radio_{selected_event_row['id']}", # id should be unique
-                    horizontal=True
-                )
+    # --- Economic Calendar Overview in Main Area ---
+    st.markdown("---")
+    with st.expander("🗓️ Full Economic Calendar Overview (Filtered)", expanded=False):
+        if not economic_df_filtered.empty:
+            calendar_display_df = economic_df_filtered[['Timestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast']].copy()
+            calendar_display_df['FormattedTimestamp'] = calendar_display_df['Timestamp'].apply(
+                lambda x: convert_and_format_time(x, selected_tz_name, "%Y-%m-%d %H:%M %Z")
+            )
+            calendar_display_df = calendar_display_df[['FormattedTimestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast']]
+            calendar_display_df.rename(columns={'FormattedTimestamp': 'Time', 'EventName': 'Event Name'}, inplace=True)
 
-                prediction_text = predict_actual_condition_for_outcome(
-                    previous_val,
-                    forecast_val,
-                    desired_outcome,
-                    currency_str,
-                    event_name_str
-                )
-                outcome_color_map = {
-                    "Bullish": "#1E4620", "Bearish": "#541B1B", "Consolidating": "#333333",
-                    "Qualitative": "#2E4053", "Indeterminate": "#4A235A", "Error": "#641E16"
-                }
-                bg_color = outcome_color_map.get(desired_outcome, "#333333") # Default for complex strings
-                if "Bullish" in desired_outcome: bg_color = outcome_color_map["Bullish"] # Simplified check
-                elif "Bearish" in desired_outcome: bg_color = outcome_color_map["Bearish"]
-                elif "Consolidating" in desired_outcome: bg_color = outcome_color_map["Consolidating"]
+            st.dataframe(
+                calendar_display_df,
+                column_config={
+                    "Time": st.column_config.TextColumn("Time", width="medium"),
+                    "Currency": st.column_config.TextColumn("CCY", width="small"),
+                    "Event Name": st.column_config.TextColumn("Event", width="large"),
+                    "Impact": st.column_config.TextColumn("Impact", width="small"),
+                    "Previous": st.column_config.NumberColumn("Prev.", format="%.2f", width="small"),
+                    "Forecast": st.column_config.NumberColumn("Fcst.", format="%.2f", width="small"),
+                },
+                use_container_width=True, hide_index=True, height=400
+            )
+        else:
+            st.info("No events to display based on the current filters.")
 
-
-                st.markdown(f"<div style='background-color: {bg_color}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
-
-
-            with tab2:
-                st.header(f"📈 Historical Trends for: {event_name_str}")
-                # Historical data dates are typically just dates, not specific times, so TZ conversion might not be critical here
-                # unless the source data provides specific times for historical releases.
-                df_hist = load_historical_data(event_name_str) 
-                if not df_hist.empty:
-                    indicator_props = get_indicator_properties(event_name_str)
-                    plot_historical_trend(df_hist, event_name_str, indicator_props.get("type", "normal"))
-                else:
-                    st.info(f"No specific historical data found for '{event_name_str}'.")
-
-            with tab3:
-                st.header(f"🔬 Simulate Actual Release Impact for: {event_name_str}")
-                # ... (rest of tab3 logic unchanged)
-                st.markdown("Enter a hypothetical 'Actual' value to see how it might be classified.")
-
-                indicator_props_sim = get_indicator_properties(event_name_str)
-                unit_sim = indicator_props_sim.get("unit", "")
-                
-                step_value = 0.1 if "%" in unit_sim else 1.0 if "K" in unit_sim else 0.01
-                if indicator_props_sim["type"] == "qualitative":
-                     st.warning(f"'{event_name_str}' is a qualitative event. Numerical simulation is not applicable.")
-                else:
-                    actual_input_val_default = forecast_val if pd.notna(forecast_val) else (previous_val if pd.notna(previous_val) else 0.0)
-                    
-                    hypothetical_actual = st.number_input(
-                        f"Enter Hypothetical 'Actual' Value ({unit_sim}):",
-                        value=float(actual_input_val_default) if pd.notna(actual_input_val_default) else 0.0,
-                        step=step_value,
-                        format="%.2f",
-                        key=f"actual_input_{selected_event_row['id']}"
-                    )
-
-                    if st.button("Classify Hypothetical Actual", key=f"classify_btn_{selected_event_row['id']}", use_container_width=True):
-                        if hypothetical_actual is not None: 
-                            classification, explanation = classify_actual_release(
-                                hypothetical_actual,
-                                forecast_val,
-                                previous_val,
-                                event_name_str,
-                                currency_str
-                            )
-                            
-                            class_bg_color = outcome_color_map.get(classification, "#333333")
-                            st.markdown(f"**Classification: <span style='color:{class_bg_color}; font-weight:bold;'>{classification}</span>**", unsafe_allow_html=True)
-                            st.markdown(f"<div style='background-color: {class_bg_color}; color: #FAFAFA; padding: 10px; border-radius: 5px; border: 1px solid #4F4F4F; margin-top:5px;'>{explanation}</div>", unsafe_allow_html=True)
-
-    # --- Economic Calendar Overview in Sidebar ---
-    st.sidebar.markdown("---")
-    st.sidebar.header("📋 Economic Calendar Overview")
-    if not economic_df_filtered.empty:
-        # Create a temporary column for display with converted times
-        calendar_display_df = economic_df_filtered[['Timestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast']].copy()
-        calendar_display_df['FormattedTimestamp'] = calendar_display_df['Timestamp'].apply(
-            lambda x: convert_and_format_time(x, selected_tz_name, "%Y-%m-%d %H:%M %Z")
-        )
-        
-        # Select and rename columns for the final display
-        calendar_display_df = calendar_display_df[['FormattedTimestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast']]
-        calendar_display_df.rename(columns={'FormattedTimestamp': 'Time', 'EventName': 'Event Name'}, inplace=True)
-
-
-        st.sidebar.dataframe(
-            calendar_display_df,
-            column_config={
-                "Time": st.column_config.TextColumn("Time", width="medium"), # Will show selected TZ
-                "Currency": st.column_config.TextColumn("CCY", width="small"),
-                "Event Name": st.column_config.TextColumn("Event", width="large"),
-                "Impact": st.column_config.TextColumn("Impact", width="small"),
-                "Previous": st.column_config.NumberColumn("Prev.", format="%.2f", width="small"),
-                "Forecast": st.column_config.NumberColumn("Fcst.", format="%.2f", width="small"),
-            },
-            use_container_width=True,
-            hide_index=True,
-            height=300 
-        )
-    else:
-        st.sidebar.info("No events to display based on the current filters.")
-
+    # --- Footer & Disclaimer ---
     st.markdown("---")
     st.caption("""
     **Disclaimer:** This tool provides generalized interpretations. Not financial advice. Data is simulated.
