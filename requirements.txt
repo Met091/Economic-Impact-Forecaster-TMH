@@ -1,8 +1,11 @@
-# updated_requirements.txt
-streamlit
-pandas
-numpy
-pytz
-altair
-investpy
-yfinance
+# requirements.txt
+# Pin package versions for stable deployments.
+# Generated on 2025-05-08, check for newer compatible versions as needed.
+streamlit==1.33.0
+pandas==2.2.2
+numpy==1.26.4
+pytz==2024.1
+altair==5.3.0
+investpy==1.0.8
+yfinance==0.2.38
+requests==2.31.0
