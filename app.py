@@ -17,8 +17,8 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Impact Forecaster", # Updated Page Title
-    page_icon="📊", # Changed Page Icon
+    page_title="Economic Impact Forecaster",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -35,8 +35,7 @@ def load_css(file_name):
         st.error(f"🚨 An error occurred while loading CSS: {e}")
 
 # --- Load Custom CSS ---
-# Assumes 'style.css' is in the same directory as app.py
-load_css("style.css")
+load_css("style.css") # Assumes 'style.css' is in the same directory as app.py
 # --- End Custom CSS Loading ---
 
 
@@ -56,7 +55,7 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
-    st.image("https://placehold.co/300x100/0F1116/007BFF?text=Impact+Forecaster&font=roboto", use_column_width=True) # Updated placeholder text
+    st.image("https://placehold.co/300x100/0F1116/007BFF?text=Impact+Forecaster&font=roboto", use_column_width=True)
     st.markdown("## ⚙️ Configuration Filters")
     st.markdown("---")
 
@@ -174,7 +173,7 @@ with st.sidebar:
 
 
 # --- Application Title & Info ---
-st.title("📊 Economic Impact Forecaster") # Updated Main Title and Icon
+st.title("📊 Economic Impact Forecaster")
 st.markdown("<div class='app-subtitle'>Powered by <strong>Trading Mastery Hub</strong> | <em>Navigating Economic Tides with Data</em></div>", unsafe_allow_html=True)
 st.markdown("---")
 
@@ -285,10 +284,24 @@ else:
         key=f"outcome_radio_main_{event_id_for_keys}", horizontal=True,
         help="Choose your desired market direction to see the required 'Actual' conditions."
     )
-    prediction_text_html = predict_actual_condition_for_outcome(previous_val, forecast_val, desired_outcome, currency_str, event_name_str)
+    
+    # Get the prediction as a list of strings
+    prediction_points = predict_actual_condition_for_outcome(previous_val, forecast_val, desired_outcome, currency_str, event_name_str)
+    
     outcome_color_map_desired = {"Bullish": "#28a745", "Bearish": "#dc3545", "Consolidating": "#6c757d"}
     bg_color_desired = outcome_color_map_desired.get(desired_outcome, "#6c757d")
-    st.markdown(f"<div class='custom-prediction-box' style='background-color: {bg_color_desired}; border-left: 5px solid {bg_color_desired};'>{prediction_text_html}</div>", unsafe_allow_html=True)
+
+    # Construct the HTML for the bullet list within the custom box
+    prediction_html_list = "".join([f"<li>{point}</li>" for point in prediction_points])
+    
+    st.markdown(
+        f"""
+        <div class='custom-prediction-box' style='background-color: {bg_color_desired}; border-left: 5px solid {bg_color_desired};'>
+            <ul style='margin-bottom: 0; padding-left: 20px;'> {prediction_html_list}
+            </ul>
+        </div>
+        """, unsafe_allow_html=True
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Tabs for Historical Data and Simulation ---
