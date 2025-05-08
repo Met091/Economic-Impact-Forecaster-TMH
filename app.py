@@ -60,13 +60,65 @@ with st.sidebar:
     st.markdown("---")
 
     st.subheader("🗓️ Date Range")
-    today = date.today(); default_start_date = today - timedelta(days=today.weekday()); default_end_date = default_start_date + timedelta(days=6)
-    if 'start_date_filter' not in st.session_state: st.session_state.start_date_filter = default_start_date
-    if 'end_date_filter' not in st.session_state: st.session_state.end_date_filter = default_end_date
+    
+    # Get today's date dynamically
+    # For consistency with user's context, using May 8, 2025 as "today"
+    # In a live app, date.today() would be used.
+    # today_date_obj = date.today() # Use this for a live app
+    today_date_obj = date(2025, 5, 8) # As per user context
+    tomorrow_date_obj = today_date_obj + timedelta(days=1)
+
+    # Initialize session state for dates if not already set
+    if 'start_date_filter' not in st.session_state:
+        # Default to current week's Monday
+        st.session_state.start_date_filter = today_date_obj - timedelta(days=today_date_obj.weekday())
+    if 'end_date_filter' not in st.session_state:
+        # Default to current week's Sunday
+        st.session_state.end_date_filter = st.session_state.start_date_filter + timedelta(days=6)
+
+    # Callback function for the button
+    def set_date_to_today_tomorrow():
+        st.session_state.start_date_filter = today_date_obj
+        st.session_state.end_date_filter = tomorrow_date_obj
+        # The date_input widgets will automatically update because their 'value'
+        # is tied to these session_state variables. A rerun is triggered by the button.
+
+    # Date input widgets
     col_start_date, col_end_date = st.columns(2)
-    with col_start_date: start_date_input = st.date_input("Start", value=st.session_state.start_date_filter, key="start_date_widget", help="Select the start date.")
-    with col_end_date: end_date_input = st.date_input("End", value=st.session_state.end_date_filter, min_value=start_date_input, key="end_date_widget", help="Select the end date.")
-    st.session_state.start_date_filter = start_date_input; st.session_state.end_date_filter = end_date_input
+    with col_start_date:
+        start_date_input = st.date_input(
+            "Start",
+            value=st.session_state.start_date_filter, # Use session state for value
+            key="start_date_widget", # Key for the widget itself
+            help="Select the start date."
+        )
+    with col_end_date:
+        end_date_input = st.date_input(
+            "End",
+            value=st.session_state.end_date_filter, # Use session state for value
+            min_value=st.session_state.start_date_filter, # Ensure end_date >= start_date
+            key="end_date_widget", # Key for the widget itself
+            help="Select the end date."
+        )
+
+    # Update session state if date inputs are changed manually
+    # This needs to happen after the button callback might have changed them
+    # and also ensures manual changes are stored.
+    # Note: Streamlit's execution model means if the button is clicked,
+    # the callback runs, then the script reruns from top.
+    # If a date_input is changed, it also causes a rerun.
+    # We only update if the widget's current value differs from session_state to avoid loops
+    # or to simply assign the current widget value to session state.
+    # A simpler way is to just assign, as the widget value is the source of truth on its change.
+    if st.session_state.start_date_widget != st.session_state.start_date_filter:
+         st.session_state.start_date_filter = st.session_state.start_date_widget
+    if st.session_state.end_date_widget != st.session_state.end_date_filter:
+         st.session_state.end_date_filter = st.session_state.end_date_widget
+
+
+    # Button to set date range to Today and Tomorrow
+    st.button("Set to Today & Tomorrow", on_click=set_date_to_today_tomorrow, use_container_width=True, key="today_tomorrow_btn")
+
 
     st.subheader("🌐 Timezone")
     common_timezones = pytz.common_timezones; default_tz_sidebar = 'US/Eastern'
@@ -205,26 +257,20 @@ else:
                 st.markdown("**Potential Bullish Points:**")
                 bullish_pts = ai_analysis_result.get("bullish_points", [])
                 if bullish_pts:
-                    for pt in bullish_pts:
-                        st.markdown(f"- {pt}")
-                else:
-                    st.caption("N/A")
+                    for pt in bullish_pts: st.markdown(f"- {pt}")
+                else: st.caption("N/A")
             with cols_ai[1]:
                 st.markdown("**Potential Bearish Points:**")
                 bearish_pts = ai_analysis_result.get("bearish_points", [])
                 if bearish_pts:
-                    for pt in bearish_pts:
-                        st.markdown(f"- {pt}")
-                else:
-                    st.caption("N/A")
+                    for pt in bearish_pts: st.markdown(f"- {pt}")
+                else: st.caption("N/A")
             
             st.markdown("**Key Considerations & Factors:**")
             key_considerations = ai_analysis_result.get("key_considerations", [])
             if key_considerations:
-                for pt in key_considerations:
-                    st.markdown(f"- {pt}")
-            else:
-                st.caption("N/A")
+                for pt in key_considerations: st.markdown(f"- {pt}")
+            else: st.caption("N/A")
 
             st.markdown(f"<div style='font-size:0.8rem;color:#A0A0A0;margin-top:10px;'><strong>Impact Scale:</strong> {ai_analysis_result.get('potential_impact','N/A')} | <strong>AI Confidence:</strong> {ai_analysis_result.get('confidence','N/A')}</div>", unsafe_allow_html=True)
             st.caption(f"ℹ️ {ai_analysis_result.get('disclaimer', 'AI analysis is experimental.')}")
