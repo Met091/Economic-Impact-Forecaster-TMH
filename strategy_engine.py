@@ -110,7 +110,7 @@ def _calculate_threshold(value, pct_threshold, abs_threshold, default_abs_thresh
 def infer_market_outlook_from_data(previous, forecast, event_name):
     """Infers a general market bias based on Forecast vs. Previous."""
     props = get_indicator_properties(event_name)
-    if props["type"] == "qualitative": return "Subjective (Qualitative)" # Changed for clarity
+    if props["type"] == "qualitative": return "Subjective (Qualitative)"
     if forecast is None or np.isnan(forecast) or previous is None or np.isnan(previous): return "Consolidating (Insufficient Data)"
     try: prev_val, fcst_val = float(previous), float(forecast)
     except ValueError: return "Consolidating (Invalid Data)"
@@ -124,88 +124,90 @@ def infer_market_outlook_from_data(previous, forecast, event_name):
 
 def predict_actual_condition_for_outcome(previous, forecast, desired_outcome, currency, event_name):
     """
-    Predicts conditions for a desired outcome. Returns a list of strings for bullet points.
+    Predicts conditions for a desired outcome. Returns a list of plain text strings.
     """
     props = get_indicator_properties(event_name)
     unit = props.get("unit", "")
     indicator_nature_desc = "lower is generally better" if props['type'] == 'inverted' else "higher is generally better"
     analysis_points = []
 
-    analysis_points.append(f"**Event Context for {currency} ({event_name}):**")
-    analysis_points.append(f"- Indicator Type: {props['type']} ({indicator_nature_desc} for {currency}).")
+    # Section headers are now plain text
+    analysis_points.append(f"Event Context for {currency} ({event_name}):")
+    analysis_points.append(f"Indicator Type: {props['type']} ({indicator_nature_desc} for {currency}).")
     if props.get('description'):
-        analysis_points.append(f"- Event Focus: {props['description']}")
+        analysis_points.append(f"Event Focus: {props['description']}")
 
     if props["type"] == "qualitative":
-        analysis_points.append(f"**For a '{desired_outcome}' outcome for {currency} from '{event_name}':**")
+        analysis_points.append(f"For a '{desired_outcome}' outcome for {currency} from '{event_name}':") # Plain section header
         if desired_outcome == "Bullish":
             analysis_points.extend([
-                f"- **Rhetoric Needed:** Clearly hawkish statements suggesting tighter monetary policy or a surprisingly optimistic economic outlook.",
-                f"- **Key Signals:** Hints of accelerated rate hikes, reduction in asset purchases, or strong confidence in achieving inflation targets (if applicable).",
-                f"- **Market Expectation:** The perceived hawkishness must exceed current market expectations to drive {currency} significantly higher."
+                f"Rhetoric Needed: Clearly hawkish statements suggesting tighter monetary policy or a surprisingly optimistic economic outlook.",
+                f"Key Signals: Hints of accelerated rate hikes, reduction in asset purchases, or strong confidence in achieving inflation targets (if applicable).",
+                f"Market Expectation: The perceived hawkishness must exceed current market expectations to drive {currency} significantly higher."
             ])
         elif desired_outcome == "Bearish":
             analysis_points.extend([
-                f"- **Rhetoric Needed:** Clearly dovish statements suggesting looser monetary policy or a surprisingly pessimistic economic outlook.",
-                f"- **Key Signals:** Hints of potential rate cuts, increase in asset purchases, or concerns about economic growth/inflation outlook.",
-                f"- **Market Expectation:** The perceived dovishness must exceed current market expectations to drive {currency} significantly lower."
+                f"Rhetoric Needed: Clearly dovish statements suggesting looser monetary policy or a surprisingly pessimistic economic outlook.",
+                f"Key Signals: Hints of potential rate cuts, increase in asset purchases, or concerns about economic growth/inflation outlook.",
+                f"Market Expectation: The perceived dovishness must exceed current market expectations to drive {currency} significantly lower."
             ])
         else: # Consolidating
             analysis_points.extend([
-                f"- **Rhetoric Needed:** Balanced statements, reaffirming current policy stance without new strong signals, or comments fully aligned with market consensus.",
-                f"- **Key Signals:** Emphasis on data-dependency, no change in forward guidance, or a mix of cautious optimism and acknowledged risks.",
-                f"- **Market Expectation:** Speech offers no major surprises, leading to limited net directional impact on {currency}."
+                f"Rhetoric Needed: Balanced statements, reaffirming current policy stance without new strong signals, or comments fully aligned with market consensus.",
+                f"Key Signals: Emphasis on data-dependency, no change in forward guidance, or a mix of cautious optimism and acknowledged risks.",
+                f"Market Expectation: Speech offers no major surprises, leading to limited net directional impact on {currency}."
             ])
-        analysis_points.append(f"- **Note:** Qualitative event impacts are highly subjective and depend on nuances of language, delivery, and prevailing market sentiment. Consider using the 'AI Sentiment Analysis' feature for deeper insights.")
+        analysis_points.append(f"Note: Qualitative event impacts are highly subjective. Consider using the 'AI Sentiment Analysis' feature for deeper insights.")
         return analysis_points
 
     if forecast is None or np.isnan(forecast):
-        analysis_points.append(f"⚠️ **Quantitative interpretation for '{event_name}' ({currency}) is not possible:** 'Forecast' data is unavailable.")
+        analysis_points.append(f"Quantitative interpretation for '{event_name}' ({currency}) is not possible: 'Forecast' data is unavailable.")
         return analysis_points
     try: forecast_val = float(forecast)
     except ValueError:
-        analysis_points.append(f"⚠️ **Error:** Forecast value '{forecast}' for '{event_name}' ({currency}) is invalid.")
+        analysis_points.append(f"Error: Forecast value '{forecast}' for '{event_name}' ({currency}) is invalid.")
         return analysis_points
 
     buffer = _calculate_threshold(forecast_val, props.get("buffer_pct"), props.get("abs_buffer"), props.get("default_buffer", INDICATOR_CONFIG["Default"]["default_buffer"]))
     strong_buffer = buffer * NUANCED_MULTIPLIER
 
-    analysis_points.append(f"**Scenario for a '{desired_outcome}' outcome for {currency} (Forecast: {forecast_val:.2f}{unit}):**")
+    analysis_points.append(f"Scenario for a '{desired_outcome}' outcome for {currency} (Forecast: {forecast_val:.2f}{unit}):") # Plain section header
     if desired_outcome == "Bullish":
         if props["type"] == "inverted":
             mild_beat, strong_beat = forecast_val - buffer, forecast_val - strong_buffer
-            analysis_points.extend([f"- **Condition:** Actual < {forecast_val:.2f}{unit}.", f"- Mildly Bullish: Actual around {mild_beat:.2f}{unit} (or lower).", f"- Strongly Bullish: Actual ≤ {strong_beat:.2f}{unit}."])
+            analysis_points.extend([f"Condition: Actual < {forecast_val:.2f}{unit}.", f"Mildly Bullish: Actual around {mild_beat:.2f}{unit} (or lower).", f"Strongly Bullish: Actual ≤ {strong_beat:.2f}{unit}."])
         else:
             mild_beat, strong_beat = forecast_val + buffer, forecast_val + strong_buffer
-            analysis_points.extend([f"- **Condition:** Actual > {forecast_val:.2f}{unit}.", f"- Mildly Bullish: Actual around {mild_beat:.2f}{unit} (or higher).", f"- Strongly Bullish: Actual ≥ {strong_beat:.2f}{unit}."])
+            analysis_points.extend([f"Condition: Actual > {forecast_val:.2f}{unit}.", f"Mildly Bullish: Actual around {mild_beat:.2f}{unit} (or higher).", f"Strongly Bullish: Actual ≥ {strong_beat:.2f}{unit}."])
     elif desired_outcome == "Bearish":
         if props["type"] == "inverted":
             mild_miss, strong_miss = forecast_val + buffer, forecast_val + strong_buffer
-            analysis_points.extend([f"- **Condition:** Actual > {forecast_val:.2f}{unit}.", f"- Mildly Bearish: Actual around {mild_miss:.2f}{unit} (or higher).", f"- Strongly Bearish: Actual ≥ {strong_miss:.2f}{unit}."])
+            analysis_points.extend([f"Condition: Actual > {forecast_val:.2f}{unit}.", f"Mildly Bearish: Actual around {mild_miss:.2f}{unit} (or higher).", f"Strongly Bearish: Actual ≥ {strong_miss:.2f}{unit}."])
         else:
             mild_miss, strong_miss = forecast_val - buffer, forecast_val - strong_buffer
-            analysis_points.extend([f"- **Condition:** Actual < {forecast_val:.2f}{unit}.", f"- Mildly Bearish: Actual around {mild_miss:.2f}{unit} (or lower).", f"- Strongly Bearish: Actual ≤ {strong_miss:.2f}{unit}."])
+            analysis_points.extend([f"Condition: Actual < {forecast_val:.2f}{unit}.", f"Mildly Bearish: Actual around {mild_miss:.2f}{unit} (or lower).", f"Strongly Bearish: Actual ≤ {strong_miss:.2f}{unit}."])
     elif desired_outcome == "Consolidating":
         lower_b, upper_b = forecast_val - buffer, forecast_val + buffer
-        analysis_points.extend([f"- **Condition:** Actual ≈ {forecast_val:.2f}{unit}.", f"- Expected Range: Approx. {lower_b:.2f}{unit} to {upper_b:.2f}{unit}."])
-    else: analysis_points.append("⚠️ Invalid desired outcome.")
+        analysis_points.extend([f"Condition: Actual ≈ {forecast_val:.2f}{unit}.", f"Expected Range: Approx. {lower_b:.2f}{unit} to {upper_b:.2f}{unit}."])
+    else: analysis_points.append("Invalid desired outcome.")
 
     if previous is not None and not np.isnan(previous):
         try:
             prev_val = float(previous)
-            analysis_points.append(f"- **Context vs. Previous ({prev_val:.2f}{unit}):**")
+            analysis_points.append(f"Context vs. Previous ({prev_val:.2f}{unit}):") # Plain section header
             fcst_outlook = infer_market_outlook_from_data(prev_val, forecast_val, event_name)
-            analysis_points.append(f"  - Forecast ({forecast_val:.2f}{unit}) suggests a **{fcst_outlook.lower()}** bias from Previous.")
+            # Sub-points are also plain
+            analysis_points.append(f"  The current forecast ({forecast_val:.2f}{unit}) suggests a {fcst_outlook.lower()} bias compared to the previous value.")
             if desired_outcome == "Bullish" and ( (props["type"] == "inverted" and forecast_val > prev_val) or (props["type"] == "normal" and forecast_val < prev_val) ):
-                analysis_points.append("  - Achieving bullish outcome requires reversing/outperforming current forecast-previous trend.")
+                analysis_points.append("  Achieving a bullish outcome would require the actual to reverse or significantly outperform the current forecast-previous trend.")
             elif desired_outcome == "Bearish" and ( (props["type"] == "inverted" and forecast_val < prev_val) or (props["type"] == "normal" and forecast_val > prev_val) ):
-                analysis_points.append("  - Achieving bearish outcome requires reversing/underperforming current forecast-previous trend.")
-        except ValueError: analysis_points.append(f"  - Previous value '{previous}' invalid.")
-    else: analysis_points.append("- Previous value not available for context.")
+                analysis_points.append("  Achieving a bearish outcome would require the actual to reverse or significantly underperform the current forecast-previous trend.")
+        except ValueError: analysis_points.append(f"  Previous value '{previous}' is invalid for comparison.")
+    else: analysis_points.append("Previous value is not available for additional context.")
     return analysis_points
 
 def classify_actual_release(actual_value, forecast_value, previous_value, event_name, currency):
-    """Classifies an 'Actual' release. Returns (classification_str, explanation_str)."""
+    """Classifies an 'Actual' release. Returns (classification_str, explanation_str with plain text)."""
     props = get_indicator_properties(event_name); unit = props.get("unit", "")
     if props["type"] == "qualitative":
         return "Qualitative", f"'{event_name}' is qualitative. Impact is subjective. Use 'AI Sentiment Analysis' for an interpretation based on perceived tone."
@@ -235,11 +237,12 @@ def classify_actual_release(actual_value, forecast_value, previous_value, event_
         try: prev_text = f", Previous: {float(previous_value):.2f}{unit}"
         except ValueError: prev_text = f", Previous: {previous_value} (invalid)"
 
+    # Explanation lines are now plain text, bolding removed.
     explanation_lines.extend([
-        f"**Event:** '{event_name}' ({currency}, Type: {props['type']})",
-        f"**Data:** Actual: {actual:.2f}{unit}, Forecast: {forecast:.2f}{unit}{prev_text}",
-        f"**Analysis:** Deviation (Actual - Fcst): {deviation:.2f}{unit}. Buffer: ±{buffer:.2f}{unit} (Strong: ±{strong_buffer:.2f}{unit}).",
-        f"**Outcome for {currency}: {classification}**"
+        f"Event: '{event_name}' ({currency}, Type: {props['type']})",
+        f"Data: Actual: {actual:.2f}{unit}, Forecast: {forecast:.2f}{unit}{prev_text}",
+        f"Analysis: Deviation (Actual - Fcst): {deviation:.2f}{unit}. Buffer: ±{buffer:.2f}{unit} (Strong: ±{strong_buffer:.2f}{unit}).",
+        f"Outcome for {currency}: {classification}" # Classification itself can be bolded in app.py if desired
     ])
     reason_map = {
         "Strongly Bullish": f"Actual significantly {'better (below)' if is_inverted else 'better (above)'} than forecast (beyond strong threshold).",
@@ -248,14 +251,14 @@ def classify_actual_release(actual_value, forecast_value, previous_value, event_
         "Mildly Bearish": f"Actual moderately {'worse (above)' if is_inverted else 'worse (below)'} than forecast (beyond buffer).",
         "Neutral/In-Line": f"Actual within expected buffer (±{buffer:.2f}{unit}) around forecast."
     }
-    explanation_lines.append(f"  - Reason: {reason_map.get(classification)}")
+    explanation_lines.append(f"  Reason: {reason_map.get(classification)}")
 
     if previous_value is not None and not np.isnan(previous_value) and pd.notna(actual):
         try:
             prev_f = float(previous_value); actual_vs_prev_dev = actual - prev_f
             prev_outlook = "better" if (is_inverted and actual < prev_f) or (not is_inverted and actual > prev_f) else "worse"
             if abs(actual_vs_prev_dev) < buffer: prev_outlook = "similar to"
-            explanation_lines.append(f"  - Vs Previous: Actual ({actual:.2f}{unit}) is {prev_outlook} Previous ({prev_f:.2f}{unit}).")
+            explanation_lines.append(f"  Vs Previous: Actual ({actual:.2f}{unit}) is {prev_outlook} Previous ({prev_f:.2f}{unit}).")
         except ValueError: pass
         
     return classification, "\n".join(explanation_lines)
