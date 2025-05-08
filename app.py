@@ -37,7 +37,7 @@ def load_css(file_name):
         st.error(f"🚨 An error occurred while loading CSS: {e}")
 
 # --- Load Custom CSS ---
-load_css("style.css")
+load_css("style.css") # Assumes 'style.css' is in the same directory as app.py
 # --- End Custom CSS Loading ---
 
 
@@ -56,7 +56,8 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
-    st.image("https://placehold.co/300x100/0F1116/007BFF?text=Impact+Forecaster&font=roboto", use_column_width=True)
+    # Corrected st.image call to use use_container_width
+    st.image("https://placehold.co/300x100/0F1116/007BFF?text=Impact+Forecaster&font=roboto", use_container_width=True)
     st.markdown("## ⚙️ Configuration Filters")
     st.markdown("---")
 
@@ -173,7 +174,7 @@ else:
     
     st.markdown("<h5>Desired Market Scenario Analysis (Baseline)</h5>", unsafe_allow_html=True)
     outcome_opts = ["Bullish", "Bearish", "Consolidating"]; def_idx = 2
-    if inferred_bias and "qualitative" not in inferred_bias.lower(): # Don't use numerical bias for qualitative default
+    if inferred_bias and "qualitative" not in inferred_bias.lower(): 
         if "bullish" in inferred_bias.lower(): def_idx = 0
         elif "bearish" in inferred_bias.lower(): def_idx = 1
     
@@ -181,6 +182,7 @@ else:
     prediction_pts = predict_actual_condition_for_outcome(prev_val, fcst_val, desired_outcome, cur_str, evt_name)
     outcome_colors = {"Bullish": "#28a745", "Bearish": "#dc3545", "Consolidating": "#6c757d"}
     box_color = outcome_colors.get(desired_outcome, "#6c757d")
+    # Using plain text from strategy_engine, wrapped in <li> by app.py
     pred_html_list = "".join([f"<li>{pt}</li>" for pt in prediction_pts])
     st.markdown(f"<div class='custom-prediction-box' style='background-color: {box_color}; border-left: 5px solid {box_color};'><ul style='margin-bottom:0; padding-left:20px;'>{pred_html_list}</ul></div>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -195,7 +197,7 @@ else:
         user_qual_sentiment = st.radio(
             "Select perceived sentiment of the event:",
             options=qual_sentiment_options,
-            index=1,  # Default to Neutral
+            index=1, 
             key=f"qual_sentiment_{event_id}",
             horizontal=True,
             help="Indicate the perceived tone of the qualitative event."
@@ -208,7 +210,7 @@ else:
             
             st.markdown(f"<h5>AI Analysis Result (Sentiment: {user_qual_sentiment})</h5>", unsafe_allow_html=True)
             
-            res_color = "#6c757d" # Neutral default
+            res_color = "#6c757d" 
             if user_qual_sentiment == "Hawkish": res_color = "#28a745"
             elif user_qual_sentiment == "Dovish": res_color = "#dc3545"
 
@@ -235,10 +237,7 @@ else:
             st.caption(f"ℹ️ {ai_analysis_result.get('disclaimer', 'AI analysis is experimental.')}")
         st.markdown('</div>', unsafe_allow_html=True)
 
-
     # --- Tabs for Historical Data and Numerical Simulation ---
-    # The "Simulate Actual Release" tab might be less relevant for purely qualitative events,
-    # but we keep it for events that might have mixed characteristics or for consistency.
     tab_hist_label = "📈 Historical Trends"
     tab_sim_label = "🔬 Simulate Actual Release"
     if indicator_props["type"] == "qualitative":
@@ -249,7 +248,6 @@ else:
     with tab_hist:
         st.markdown('<div class="content-section">', unsafe_allow_html=True)
         st.subheader(f"Historical Trends for: {evt_name}")
-        # ... (rest of historical trends logic remains the same) ...
         is_av_source = False
         if 'ALPHA_VANTAGE_API_KEY' in st.secrets:
             event_to_av_map = {"Non-Farm Employment Change": {}, "Unemployment Rate": {}, "Core CPI m/m": {}, "CPI m/m": {}, "Retail Sales m/m": {}, "Real GDP": {}, "Treasury Yield": {}, "Federal Funds Rate": {}}
