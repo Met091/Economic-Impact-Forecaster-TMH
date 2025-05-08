@@ -1,0 +1,273 @@
+/* style.css */
+
+/* --- General App Styling --- */
+.stApp {
+    /* Theme colors are primarily controlled by .streamlit/config.toml */
+    /* This file will override or augment those styles */
+}
+
+/* --- Sidebar Enhancements --- */
+.stSidebar > div:first-child {
+    /* Specific sidebar styling if needed */
+}
+.stSidebar .stsubheader { /* Matches subheader class in Streamlit */
+    color: #00A0B0; /* Example: A teal color, adjust to match your theme's primary or accent */
+    font-weight: bold;
+}
+/* Making sidebar headers more distinct */
+div[data-testid="stSidebarUserContent"] h2,
+div[data-testid="stSidebarUserContent"] h3,
+div[data-testid="stSidebarUserContent"] .stsubheader {
+    border-bottom: 1px solid #2c3038; /* Subtle border for separation */
+    padding-bottom: 0.3rem;
+    margin-bottom: 0.5rem;
+}
+
+
+/* --- Main Content Area Enhancements --- */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    padding-left: 1.5rem; /* Adjust main content padding */
+    padding-right: 1.5rem;
+}
+
+/* --- Card-like Sections --- */
+.content-section {
+    background-color: #1E2128; /* secondaryBackgroundColor from your theme */
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid #2c3038; /* Subtle border */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15); /* Slightly more pronounced shadow */
+}
+.content-section h2,
+.content-section .stsubheader { /* Targeting Streamlit's subheader class */
+    color: #E0E0E0; /* textColor from your theme */
+    margin-top: 0;
+    border-bottom: 1px solid #007BFF; /* primaryColor from your theme */
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+
+/* --- Metric Styling --- */
+div[data-testid="stMetricLabel"] > div {
+    font-size: 0.9rem;
+    color: #A0A0A0; /* Softer color for label */
+    font-weight: 500;
+}
+div[data-testid="stMetricValue"] > div {
+    font-size: 1.8rem; /* Slightly larger value */
+    font-weight: 600; /* Bolder value */
+    color: #FFFFFF; /* Ensure high contrast for value */
+}
+div[data-testid="stMetricDelta"] > div {
+    font-size: 1rem;
+    font-weight: 500;
+}
+
+/* --- Button Styling --- */
+.stButton > button {
+    border-radius: 0.3rem;
+    padding: 0.6rem 1.2rem; /* Slightly larger padding */
+    font-weight: bold;
+    border: 1px solid #007BFF; /* primaryColor */
+    background-color: #007BFF;
+    color: #FFFFFF;
+    transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out, transform 0.1s ease;
+}
+.stButton > button:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+    color: #FFFFFF;
+    transform: translateY(-1px); /* Subtle lift effect */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+.stButton > button:focus, .stButton > button:active {
+    outline: none !important;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.5) !important;
+    background-color: #004085; /* Darker when active/focused */
+    border-color: #004085;
+}
+
+
+/* --- Radio Button Styling --- */
+div[data-testid="stRadio"] > label > div:first-child { /* The label of the radio group */
+    font-weight: bold;
+    color: #E0E0E0;
+    margin-bottom: 0.75rem; /* More space below label */
+    font-size: 1.05rem;
+}
+div[data-testid="stRadio"] > div { /* Options container */
+    background-color: #262730;
+    padding: 0.75rem; /* More padding around options */
+    border-radius: 0.4rem;
+    border: 1px solid #30333a;
+}
+/* Individual radio option labels */
+div[data-testid="stRadio"] label {
+    font-size: 0.95rem;
+}
+
+/* --- Selectbox & Multiselect Styling --- */
+div[data-testid="stSelectbox"] > div:first-child,
+div[data-testid="stMultiselect"] > label > div:first-child { /* The label */
+    font-weight: bold;
+    color: #E0E0E0;
+    font-size: 1.05rem; /* Consistent label size */
+    margin-bottom: 0.5rem;
+}
+/* The input field itself */
+div[data-testid="stSelectbox"] div[data-baseweb="select"],
+div[data-testid="stMultiselect"] div[data-baseweb="select"] {
+    border-radius: 0.3rem;
+}
+
+
+/* --- Tab Styling --- */
+div[data-testid="stTabs"] button[role="tab"] {
+    font-weight: 600; /* Bolder tab titles */
+    padding: 0.7rem 1.1rem;
+    border-radius: 0.4rem 0.4rem 0 0;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    color: #A0A0A0; /* Default tab color */
+}
+div[data-testid="stTabs"] button[role="tab"]:hover {
+    background-color: #2a2d34;
+    color: #FFFFFF;
+}
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+    background-color: #1E2128; /* Match content section bg */
+    color: #007BFF; /* primaryColor */
+    border-bottom: 3px solid #007BFF; /* Thicker border for active tab */
+}
+
+/* --- Expander Styling --- */
+.stExpander > summary {
+    font-weight: bold;
+    font-size: 1.1rem;
+    background-color: #1E2128; /* Match content section bg */
+    border-radius: 0.4rem;
+    padding: 0.8rem 1rem;
+    border: 1px solid #2c3038;
+    transition: background-color 0.2s ease;
+}
+.stExpander > summary:hover {
+    background-color: #2c3038;
+}
+.stExpander > summary svg { /* Chevron icon */
+    fill: #007BFF; /* Primary color for icon */
+}
+.stExpander div[data-testid="stExpanderDetails"] {
+    background-color: #161A25; /* Slightly different background for expanded content */
+    border: 1px solid #2c3038;
+    border-top: none; /* Avoid double border with summary */
+    padding: 1rem;
+    border-radius: 0 0 0.4rem 0.4rem;
+}
+
+
+/* --- Custom Info/Message Box Styling --- */
+.custom-info-box {
+    background-color: rgba(0, 123, 255, 0.1);
+    color: #E0E0E0;
+    padding: 1.2rem; /* More padding */
+    border-radius: 0.4rem;
+    border-left: 5px solid #007BFF;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+}
+.custom-prediction-box {
+    color: #FAFAFA;
+    padding: 1.2rem;
+    border-radius: 0.5rem;
+    /* background-color is set inline in app.py */
+    /* border-left is set inline in app.py */
+    margin-top:1rem;
+    font-size: 1rem; /* Larger font for prediction */
+    line-height: 1.6;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+.custom-classification-box {
+    color: #FAFAFA;
+    /* border-color is set inline in app.py */
+    /* background-color is set inline in app.py */
+    border-width: 1px;
+    border-style: solid;
+    padding: 1rem;
+    border-radius: 0.4rem;
+    margin-top: 0.75rem;
+    white-space: pre-wrap;
+    font-family: 'Monaco', 'Consolas', 'monospace'; /* Clear monospace font */
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* --- Dataframe styling --- */
+.stDataFrame {
+    border: 1px solid #2c3038;
+    border-radius: 0.4rem;
+}
+/* Header style for dataframe */
+div[data-testid="stDataFrameResizable"] > div > div[role="columnheader"] {
+    background-color: #262730;
+    font-weight: bold;
+    color: #E0E0E0;
+}
+
+
+/* --- Footer Styling --- */
+.stCaption {
+    color: #888888; /* Lighter grey for less emphasis */
+    font-size: 0.85rem;
+    text-align: center;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+hr {
+    border-top: 1px solid #3a3f4b; /* Slightly more visible HR */
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+/* --- Specific Element Adjustments --- */
+/* Title styling */
+h1[data-testid="stHeading"] {
+    color: #FFFFFF; /* Ensure title is bright */
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #007BFF; /* Accent under main title */
+    margin-bottom: 1rem;
+}
+/* Subtitle/tagline styling */
+.main .block-container > div:nth-child(1) > div > div > div:nth-child(2) .stMarkdown p {
+    /* This selector is fragile; targets the "Powered by..." markdown.
+       Consider wrapping it in a div with a class in app.py for robustness. */
+    font-size: 0.95rem;
+    font-style: italic;
+    color: #B0B0B0;
+}
+
+/* Placeholder logo in sidebar */
+.stImage > img {
+    border-radius: 0.3rem;
+    border: 1px solid #2c3038;
+}
+
+/* Ensure Streamlit's default error/warning boxes also fit the theme */
+div[data-testid="stAlert"] {
+    border-radius: 0.4rem;
+    padding: 1rem;
+}
+div[data-testid="stAlert"] p { /* Text inside alerts */
+    color: #FFFFFF !important; /* Override default text color if needed */
+}
+/* Specific for error */
+div[data-testid="stAlert"][data-baseweb="alert"][role="alert"] > div:first-child { /* Icon container */
+    /* background-color: #dc3545 !important; /* Bootstrap danger red - might be too much */
+}
+/* Specific for warning */
+div[data-testid="stAlert"][data-baseweb="alert"][role="alert"] > div:first-child {
+    /* background-color: #ffc107 !important; /* Bootstrap warning yellow */
+}
