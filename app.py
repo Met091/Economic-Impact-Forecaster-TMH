@@ -56,7 +56,6 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
-    # Corrected st.image call to use use_container_width
     st.image("https://placehold.co/300x100/0F1116/007BFF?text=Impact+Forecaster&font=roboto", use_container_width=True)
     st.markdown("## ⚙️ Configuration Filters")
     st.markdown("---")
@@ -78,35 +77,72 @@ with st.sidebar:
     st.markdown("---")
 
 # --- Load Data ---
+# This function call is placed here so that economic_df_master is available for the subsequent sidebar elements
 economic_df_master, data_status_message = load_economic_data(st.session_state.start_date_filter, st.session_state.end_date_filter)
 
 # --- Sidebar Config (Continued) ---
+# This 'with st.sidebar:' block ensures these elements are also in the sidebar.
+# It's okay to have multiple such blocks for organization.
 with st.sidebar:
     st.subheader("💱 Currencies")
-    if not economic_df_master.empty and 'Currency' in economic_df_master.columns: available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
-    else: available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"]
+    if not economic_df_master.empty and 'Currency' in economic_df_master.columns:
+        available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
+    else:
+        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] # Fallback
     currency_options = ["All"] + available_currencies
-    if 'selected_currencies_filter' not in st.session_state: st.session_state.selected_currencies_filter = ["All"]
-    current_currency_selection = st.session_state.selected_currencies_filter; valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]; default_currency_sel = valid_current_selection_curr if valid_current_selection_curr else ["All"]
-    selected_currencies = st.multiselect("Filter Currencies:", options=currency_options, default=default_currency_sel, key="selected_currencies_widget_updated", help="Select currencies.")
+
+    if 'selected_currencies_filter' not in st.session_state:
+        st.session_state.selected_currencies_filter = ["All"]
+
+    current_currency_selection = st.session_state.selected_currencies_filter
+    valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]
+    default_currency_sel = valid_current_selection_curr if valid_current_selection_curr else ["All"]
+
+    selected_currencies = st.multiselect(
+        "Filter Currencies:",
+        options=currency_options,
+        default=default_currency_sel,
+        key="selected_currencies_widget_updated", # Ensure key is unique if widget is re-declared
+        help="Select currencies to filter events."
+    )
     st.session_state.selected_currencies_filter = selected_currencies
 
     st.subheader("⚡ Impact Level")
     impact_level_options_std = ["High", "Medium", "Low"]
     if not economic_df_master.empty and 'Impact' in economic_df_master.columns:
         data_impact_values = sorted([str(imp) for imp in economic_df_master['Impact'].unique() if pd.notna(imp) and str(imp) != 'N/A'])
-        combined_impact_options = []; [combined_impact_options.append(opt) for opt in impact_level_options_std if opt in data_impact_values and opt not in combined_impact_options]; [combined_impact_options.append(opt) for opt in data_impact_values if opt not in combined_impact_options]
+        combined_impact_options = []
+        [combined_impact_options.append(opt) for opt in impact_level_options_std if opt in data_impact_values and opt not in combined_impact_options]
+        [combined_impact_options.append(opt) for opt in data_impact_values if opt not in combined_impact_options]
         impact_filter_options = ["All"] + (combined_impact_options if combined_impact_options else impact_level_options_std)
-    else: impact_filter_options = ["All"] + impact_level_options_std
-    if 'selected_impact_filter' not in st.session_state: st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
-    current_impact_selection = st.session_state.selected_impact_filter; valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]; default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else (["High"] if "High" in impact_filter_options else ["All"])
-    selected_impacts = st.multiselect("Filter Impact:", options=impact_filter_options, default=default_impact_sel, key="selected_impact_widget", help="Select impact levels.")
+    else:
+        impact_filter_options = ["All"] + impact_level_options_std
+
+    if 'selected_impact_filter' not in st.session_state:
+        st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
+
+    current_impact_selection = st.session_state.selected_impact_filter
+    valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
+    default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else (["High"] if "High" in impact_filter_options else ["All"])
+    
+    # The accidental print/write causing the NULL output was likely here or around this logic.
+    # Ensure no st.write(variable_name) or print(variable_name) is present in this section.
+
+    selected_impacts = st.multiselect(
+        "Filter Impact:",
+        options=impact_filter_options,
+        default=default_impact_sel,
+        key="selected_impact_widget", # Ensure key is unique
+        help="Select impact levels to filter events."
+    )
     st.session_state.selected_impact_filter = selected_impacts
 
     st.markdown("---")
     st.caption(f"Calendar Status: {data_status_message}")
-    if 'ALPHA_VANTAGE_API_KEY' not in st.secrets: st.caption("AV Key: ⚠️ Missing")
-    else: st.caption("AV Key: 🔑 Configured")
+    if 'ALPHA_VANTAGE_API_KEY' not in st.secrets:
+        st.caption("AV Key: ⚠️ Missing (US Historicals limited)")
+    else:
+        st.caption("AV Key: 🔑 Configured")
     st.markdown("---")
     st.markdown("<div class='custom-info-box' style='background-color: rgba(0,123,255,0.05); border-left-color: #00A0B0;'>Tip: Use filters to narrow events. Click an event below for analysis.</div>", unsafe_allow_html=True)
 
@@ -117,8 +153,10 @@ st.markdown("---")
 
 # --- Apply Filters ---
 economic_df_filtered = economic_df_master.copy()
-if 'Currency' in economic_df_filtered.columns and not ("All" in selected_currencies or not selected_currencies) : economic_df_filtered = economic_df_filtered[economic_df_filtered['Currency'].isin(selected_currencies)]
-if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts or not selected_impacts): economic_df_filtered = economic_df_filtered[economic_df_filtered['Impact'].isin(selected_impacts)]
+if 'Currency' in economic_df_filtered.columns and not ("All" in selected_currencies or not selected_currencies) :
+    economic_df_filtered = economic_df_filtered[economic_df_filtered['Currency'].isin(selected_currencies)]
+if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts or not selected_impacts):
+    economic_df_filtered = economic_df_filtered[economic_df_filtered['Impact'].isin(selected_impacts)]
 
 # --- Main Application Area ---
 if economic_df_master.empty:
@@ -150,9 +188,8 @@ else:
     evt_name, cur_str, imp_str = str(selected_event_row.get('EventName', 'N/A')), str(selected_event_row.get('Currency', 'N/A')), str(selected_event_row.get('Impact', 'N/A'))
     evt_ts = selected_event_row.get('Timestamp'); fmt_evt_time = convert_and_format_time(evt_ts, selected_tz_name)
     
-    indicator_props = get_indicator_properties(evt_name) # Get properties once
+    indicator_props = get_indicator_properties(evt_name) 
 
-    # --- Event Details Section ---
     st.markdown('<div class="content-section">', unsafe_allow_html=True)
     st.subheader(f"🔍 Details: {evt_name}")
     det_cols = st.columns([1.5, 1.5, 1, 1, 1])
@@ -166,7 +203,6 @@ else:
     st.caption(f"Scheduled: {date_p} at {time_p} ({selected_tz_name})")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Interpretation Section (Numerical & Qualitative Baseline) ---
     st.markdown('<div class="content-section">', unsafe_allow_html=True)
     st.subheader("🎯 Baseline Interpretation")
     inferred_bias = infer_market_outlook_from_data(prev_val, fcst_val, evt_name)
@@ -182,26 +218,17 @@ else:
     prediction_pts = predict_actual_condition_for_outcome(prev_val, fcst_val, desired_outcome, cur_str, evt_name)
     outcome_colors = {"Bullish": "#28a745", "Bearish": "#dc3545", "Consolidating": "#6c757d"}
     box_color = outcome_colors.get(desired_outcome, "#6c757d")
-    # Using plain text from strategy_engine, wrapped in <li> by app.py
-    pred_html_list = "".join([f"<li>{pt}</li>" for pt in prediction_pts])
+    pred_html_list = "".join([f"<li>{pt}</li>" for pt in prediction_pts]) # Plain text from strategy_engine
     st.markdown(f"<div class='custom-prediction-box' style='background-color: {box_color}; border-left: 5px solid {box_color};'><ul style='margin-bottom:0; padding-left:20px;'>{pred_html_list}</ul></div>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- AI-Powered Qualitative Analysis Section (Only for Qualitative Events) ---
     if indicator_props["type"] == "qualitative":
         st.markdown('<div class="content-section">', unsafe_allow_html=True)
         st.subheader("🤖 AI Sentiment Analysis (Qualitative Event)")
         st.markdown(f"Since **{evt_name}** is a qualitative event, its impact is driven by the perceived tone and message. Use the AI assistant below to explore potential interpretations based on a selected sentiment.")
 
         qual_sentiment_options = ["Hawkish", "Neutral", "Dovish"]
-        user_qual_sentiment = st.radio(
-            "Select perceived sentiment of the event:",
-            options=qual_sentiment_options,
-            index=1, 
-            key=f"qual_sentiment_{event_id}",
-            horizontal=True,
-            help="Indicate the perceived tone of the qualitative event."
-        )
+        user_qual_sentiment = st.radio("Select perceived sentiment:",options=qual_sentiment_options,index=1,key=f"qual_sentiment_{event_id}",horizontal=True,help="Indicate perceived tone.")
 
         if st.button("Analyze Qualitative Sentiment with AI", key=f"analyze_qual_ai_{event_id}", use_container_width=True):
             with st.spinner(f"🧠 AI is analyzing '{evt_name}' with a '{user_qual_sentiment}' sentiment for {cur_str}..."):
@@ -209,40 +236,23 @@ else:
                 ai_analysis_result = analyze_qualitative_event_llm(evt_name, user_qual_sentiment, cur_str, event_desc_for_ai)
             
             st.markdown(f"<h5>AI Analysis Result (Sentiment: {user_qual_sentiment})</h5>", unsafe_allow_html=True)
-            
             res_color = "#6c757d" 
             if user_qual_sentiment == "Hawkish": res_color = "#28a745"
             elif user_qual_sentiment == "Dovish": res_color = "#dc3545"
-
             st.markdown(f"<div class='custom-info-box' style='border-left-color: {res_color};'><strong>Summary:</strong> {ai_analysis_result.get('summary', 'N/A')}</div>", unsafe_allow_html=True)
-            
             cols_ai = st.columns(2)
             with cols_ai[0]:
-                st.markdown("**Potential Bullish Points:**")
-                if ai_analysis_result.get("bullish_points"):
-                    for point in ai_analysis_result["bullish_points"]: st.markdown(f"- {point}")
-                else: st.caption("N/A")
+                st.markdown("**Potential Bullish Points:**"); [st.markdown(f"- {pt}") for pt in ai_analysis_result.get("bullish_points", [])] if ai_analysis_result.get("bullish_points") else st.caption("N/A")
             with cols_ai[1]:
-                st.markdown("**Potential Bearish Points:**")
-                if ai_analysis_result.get("bearish_points"):
-                    for point in ai_analysis_result["bearish_points"]: st.markdown(f"- {point}")
-                else: st.caption("N/A")
-            
-            st.markdown("**Key Considerations & Factors:**")
-            if ai_analysis_result.get("key_considerations"):
-                for point in ai_analysis_result["key_considerations"]: st.markdown(f"- {point}")
-            else: st.caption("N/A")
-
-            st.markdown(f"<div style='font-size: 0.8rem; color: #A0A0A0; margin-top:10px;'><strong>Potential Impact Scale:</strong> {ai_analysis_result.get('potential_impact', 'N/A')} | <strong>AI Confidence:</strong> {ai_analysis_result.get('confidence', 'N/A')}</div>", unsafe_allow_html=True)
+                st.markdown("**Potential Bearish Points:**"); [st.markdown(f"- {pt}") for pt in ai_analysis_result.get("bearish_points", [])] if ai_analysis_result.get("bearish_points") else st.caption("N/A")
+            st.markdown("**Key Considerations & Factors:**"); [st.markdown(f"- {pt}") for pt in ai_analysis_result.get("key_considerations", [])] if ai_analysis_result.get("key_considerations") else st.caption("N/A")
+            st.markdown(f"<div style='font-size:0.8rem;color:#A0A0A0;margin-top:10px;'><strong>Impact Scale:</strong> {ai_analysis_result.get('potential_impact','N/A')} | <strong>AI Confidence:</strong> {ai_analysis_result.get('confidence','N/A')}</div>", unsafe_allow_html=True)
             st.caption(f"ℹ️ {ai_analysis_result.get('disclaimer', 'AI analysis is experimental.')}")
         st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- Tabs for Historical Data and Numerical Simulation ---
+        
     tab_hist_label = "📈 Historical Trends"
     tab_sim_label = "🔬 Simulate Actual Release"
-    if indicator_props["type"] == "qualitative":
-        tab_sim_label = "🔬 Numerical Simulation (N/A for Purely Qualitative)"
-        
+    if indicator_props["type"] == "qualitative": tab_sim_label = "🔬 Numerical Simulation (N/A for Purely Qualitative)"
     tab_hist, tab_sim = st.tabs([tab_hist_label, tab_sim_label])
 
     with tab_hist:
@@ -250,61 +260,55 @@ else:
         st.subheader(f"Historical Trends for: {evt_name}")
         is_av_source = False
         if 'ALPHA_VANTAGE_API_KEY' in st.secrets:
-            event_to_av_map = {"Non-Farm Employment Change": {}, "Unemployment Rate": {}, "Core CPI m/m": {}, "CPI m/m": {}, "Retail Sales m/m": {}, "Real GDP": {}, "Treasury Yield": {}, "Federal Funds Rate": {}}
-            if any(key_event.lower() in evt_name.lower() for key_event in event_to_av_map): is_av_source = True
+            evt_to_av_map = {"Non-Farm Employment Change":{},"Unemployment Rate":{},"Core CPI m/m":{},"CPI m/m":{},"Retail Sales m/m":{},"Real GDP":{},"Treasury Yield":{},"Federal Funds Rate":{}}
+            if any(key_evt.lower() in evt_name.lower() for key_evt in evt_to_av_map): is_av_source = True
         df_hist = load_historical_data(evt_name)
         if not df_hist.empty:
             cap_txt = f"Displaying historical data for {evt_name}. "
             if is_av_source and 'Forecast' not in df_hist.columns: cap_txt += "Sourced from Alpha Vantage (US Data - 'Actual' values). Forecast/Previous may not be available."
             else: cap_txt += "May include sample data if live source is unavailable or lacks all fields."
-            st.caption(cap_txt)
-            plot_historical_trend(df_hist, evt_name, indicator_props.get("type", "normal"))
+            st.caption(cap_txt); plot_historical_trend(df_hist, evt_name, indicator_props.get("type", "normal"))
         else: st.info(f"ℹ️ No historical data found for '{evt_name}'.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     with tab_sim:
         st.markdown('<div class="content-section">', unsafe_allow_html=True)
         st.subheader(f"Simulate Actual Release Impact for: {evt_name}")
-        
         if indicator_props["type"] == "qualitative":
-            st.info(f"ℹ️ Numerical simulation is not applicable for purely qualitative events like '{evt_name}'. Analysis is based on perceived sentiment and rhetoric.")
+            st.info(f"ℹ️ Numerical simulation is not applicable for purely qualitative events like '{evt_name}'.")
         else:
             st.markdown("Enter a hypothetical 'Actual' value to see its classified impact.")
-            unit_sim = indicator_props.get("unit", "")
-            step_val = 0.1 if "%" in unit_sim else (1.0 if "K" in unit_sim or "M" in unit_sim else 0.01)
-            actual_input_default = fcst_val if pd.notna(fcst_val) else (prev_val if pd.notna(prev_val) else 0.0)
-            hypothetical_actual = st.number_input(f"Hypothetical 'Actual' ({unit_sim}):", value=float(actual_input_default) if pd.notna(actual_input_default) else 0.0, step=float(step_val), format="%.2f", key=f"actual_input_{event_id}", help=f"Enter hypothetical actual for {evt_name}.")
+            unit_sim = indicator_props.get("unit",""); step_v = 0.1 if "%" in unit_sim else (1.0 if "K" in unit_sim or "M" in unit_sim else 0.01)
+            actual_in_def = fcst_val if pd.notna(fcst_val) else (prev_val if pd.notna(prev_val) else 0.0)
+            hyp_actual = st.number_input(f"Hypothetical 'Actual' ({unit_sim}):",value=float(actual_in_def) if pd.notna(actual_in_def) else 0.0,step=float(step_v),format="%.2f",key=f"actual_input_{event_id}",help=f"Enter hypothetical actual for {evt_name}.")
             if st.button("Classify Hypothetical Actual", key=f"classify_btn_{event_id}", use_container_width=True):
-                classification, explanation = classify_actual_release(hypothetical_actual, fcst_val, prev_val, evt_name, cur_str)
-                nu_colors = {"Strongly Bullish":"#145A32", "Mildly Bullish":"#27AE60", "Neutral/In-Line":"#808B96", "Mildly Bearish":"#E74C3C", "Strongly Bearish":"#922B21", "Qualitative":"#2E4053", "Indeterminate":"#4A235A", "Error":"#641E16"}
+                classification, explanation = classify_actual_release(hyp_actual, fcst_val, prev_val, evt_name, cur_str)
+                nu_colors = {"Strongly Bullish":"#145A32","Mildly Bullish":"#27AE60","Neutral/In-Line":"#808B96","Mildly Bearish":"#E74C3C","Strongly Bearish":"#922B21","Qualitative":"#2E4053","Indeterminate":"#4A235A","Error":"#641E16"}
                 cls_bg_color = nu_colors.get(classification, "#333333")
-                st.markdown(f"**Classification:** <span style='background-color:{cls_bg_color}; color:white; padding:3px 7px; border-radius:4px; font-weight:bold;'>{classification}</span>", unsafe_allow_html=True)
-                st.markdown(f"<div class='custom-classification-box' style='border-color:{cls_bg_color}; background-color:#1c1e22;'>{explanation}</div>", unsafe_allow_html=True)
+                st.markdown(f"**Classification:** <span style='background-color:{cls_bg_color};color:white;padding:3px 7px;border-radius:4px;font-weight:bold;'>{classification}</span>", unsafe_allow_html=True)
+                st.markdown(f"<div class='custom-classification-box' style='border-color:{cls_bg_color};background-color:#1c1e22;'>{explanation}</div>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Economic Calendar Overview ---
     st.markdown("---")
     with st.expander("🗓️ Full Economic Calendar Overview (Filtered)", expanded=False):
         if not economic_df_filtered.empty:
             cal_df = economic_df_filtered.copy()
             if 'Timestamp' in cal_df.columns and pd.api.types.is_datetime64_any_dtype(cal_df['Timestamp']):
                 cal_df['FormattedTimestamp'] = cal_df['Timestamp'].apply(lambda x: convert_and_format_time(x, selected_tz_name, fmt="%Y-%m-%d %I:%M %p"))
-                disp_cols = ['FormattedTimestamp', 'Currency', 'Impact', 'EventName', 'Previous', 'Forecast', 'Actual', 'Zone']
+                disp_cols = ['FormattedTimestamp','Currency','Impact','EventName','Previous','Forecast','Actual','Zone']
                 cal_df = cal_df[[col for col in disp_cols if col in cal_df.columns]]
-                cal_df.rename(columns={'FormattedTimestamp': 'Time', 'EventName': 'Event Name', 'Currency': 'Ccy'}, inplace=True)
+                cal_df.rename(columns={'FormattedTimestamp':'Time','EventName':'Event Name','Currency':'Ccy'},inplace=True)
             else:
-                cal_df['Time'] = "Data Error"
-                disp_cols_err = ['Time', 'Currency', 'Impact', 'EventName', 'Previous', 'Forecast', 'Actual', 'Zone']
+                cal_df['Time']="Data Error"; disp_cols_err=['Time','Currency','Impact','EventName','Previous','Forecast','Actual','Zone']
                 cal_df = cal_df[[col for col in disp_cols_err if col in cal_df.columns]]
-            st.dataframe(cal_df.sort_values(by='Time'), use_container_width=True, hide_index=True, height=450,
+            st.dataframe(cal_df.sort_values(by='Time'),use_container_width=True,hide_index=True,height=450,
                 column_config={
-                    "Time": st.column_config.TextColumn("Time", width="medium", help="Scheduled time"), "Ccy": st.column_config.TextColumn("Ccy", width="small"),
-                    "Impact": st.column_config.TextColumn("Impact", width="small"), "Event Name": st.column_config.TextColumn("Event", width="large"),
-                    "Previous": st.column_config.NumberColumn("Prev.", format="%.2f", width="small"), "Forecast": st.column_config.NumberColumn("Fcst.", format="%.2f", width="small"),
-                    "Actual": st.column_config.NumberColumn("Actual", format="%.2f", width="small"), "Zone": st.column_config.TextColumn("Zone", width="small"),
+                    "Time":st.column_config.TextColumn("Time",width="medium",help="Scheduled time"),"Ccy":st.column_config.TextColumn("Ccy",width="small"),
+                    "Impact":st.column_config.TextColumn("Impact",width="small"),"Event Name":st.column_config.TextColumn("Event",width="large"),
+                    "Previous":st.column_config.NumberColumn("Prev.",format="%.2f",width="small"),"Forecast":st.column_config.NumberColumn("Fcst.",format="%.2f",width="small"),
+                    "Actual":st.column_config.NumberColumn("Actual",format="%.2f",width="small"),"Zone":st.column_config.TextColumn("Zone",width="small"),
                 })
         else: st.info("ℹ️ No events to display in calendar based on current filters.")
 
-# --- Footer ---
 st.markdown("---")
 st.caption("Trading Mastery Hub © 2024-2025 | Disclaimer: Generalized interpretations, not financial advice. Data accuracy depends on sources and is not guaranteed. Always conduct your own research.")
