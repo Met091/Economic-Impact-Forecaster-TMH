@@ -1,0 +1,19 @@
+# .streamlit/config.toml
+
+[theme]
+primaryColor="#2E86C1" # A professional blue
+backgroundColor="#F0F2F6" # Light grey background
+secondaryBackgroundColor="#FFFFFF" # White for elements
+textColor="#262730" # Dark text for readability
+font="sans serif" # Standard sans-serif font
+
+[runner]
+# Enables faster development by automatically rerunning the script on change
+# This is often default behavior but can be explicitly set.
+fastReruns = true
+
+[server]
+# Port for the Streamlit app (optional, Streamlit will pick one if not set)
+# port = 8501
+# Headless mode for running in environments without a browser (e.g., CI/CD)
+# headless = false
