@@ -60,64 +60,33 @@ with st.sidebar:
     st.markdown("---")
 
     st.subheader("🗓️ Date Range")
-
-    # Get today's date dynamically
-    # For consistency with user's context, using May 8, 2025 as "today"
-    # In a live app, date.today() would be used.
-    # today_date_obj = date.today() # Use this for a live app
+    # Get today's date dynamically (using a fixed date for context consistency)
     today_date_obj = date(2025, 5, 8) # As per user context
     tomorrow_date_obj = today_date_obj + timedelta(days=1)
-    # Calculate current week's Monday and Sunday
-    start_of_week = today_date_obj - timedelta(days=today_date_obj.weekday()) # Monday is 0
-    end_of_week = start_of_week + timedelta(days=6) # Sunday
+    start_of_week = today_date_obj - timedelta(days=today_date_obj.weekday())
+    end_of_week = start_of_week + timedelta(days=6)
 
-    # Initialize session state for dates if not already set
-    if 'start_date_filter' not in st.session_state:
-        st.session_state.start_date_filter = start_of_week # Default to current week's Monday
-    if 'end_date_filter' not in st.session_state:
-        st.session_state.end_date_filter = end_of_week # Default to current week's Sunday
+    if 'start_date_filter' not in st.session_state: st.session_state.start_date_filter = start_of_week
+    if 'end_date_filter' not in st.session_state: st.session_state.end_date_filter = end_of_week
 
-    # Callback functions for the buttons
     def set_date_to_today_tomorrow():
         st.session_state.start_date_filter = today_date_obj
         st.session_state.end_date_filter = tomorrow_date_obj
-
     def set_date_to_current_week():
         st.session_state.start_date_filter = start_of_week
         st.session_state.end_date_filter = end_of_week
 
-    # Date input widgets
     col_start_date, col_end_date = st.columns(2)
-    with col_start_date:
-        start_date_input = st.date_input(
-            "Start",
-            value=st.session_state.start_date_filter,
-            key="start_date_widget",
-            help="Select the start date."
-        )
-    with col_end_date:
-        end_date_input = st.date_input(
-            "End",
-            value=st.session_state.end_date_filter,
-            min_value=st.session_state.start_date_filter,
-            key="end_date_widget",
-            help="Select the end date."
-        )
+    with col_start_date: start_date_input = st.date_input("Start", value=st.session_state.start_date_filter, key="start_date_widget", help="Select start date.")
+    with col_end_date: end_date_input = st.date_input("End", value=st.session_state.end_date_filter, min_value=st.session_state.start_date_filter, key="end_date_widget", help="Select end date.")
 
-    # Update session state if date inputs are changed manually
-    if st.session_state.start_date_widget != st.session_state.start_date_filter:
-         st.session_state.start_date_filter = st.session_state.start_date_widget
-    if st.session_state.end_date_widget != st.session_state.end_date_filter:
-         st.session_state.end_date_filter = st.session_state.end_date_widget
+    # Sync manual date changes back to session state
+    if st.session_state.start_date_widget != st.session_state.start_date_filter: st.session_state.start_date_filter = st.session_state.start_date_widget
+    if st.session_state.end_date_widget != st.session_state.end_date_filter: st.session_state.end_date_filter = st.session_state.end_date_widget
 
-    # Buttons to set date range
-    # Use columns to place buttons side-by-side
     col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        st.button("Set to Today & Tomorrow", on_click=set_date_to_today_tomorrow, use_container_width=True, key="today_tomorrow_btn")
-    with col_btn2:
-        st.button("Set to Current Week", on_click=set_date_to_current_week, use_container_width=True, key="current_week_btn")
-
+    with col_btn1: st.button("Today & Tomorrow", on_click=set_date_to_today_tomorrow, use_container_width=True, key="today_tomorrow_btn") # Shortened label
+    with col_btn2: st.button("Current Week", on_click=set_date_to_current_week, use_container_width=True, key="current_week_btn")
 
     st.subheader("🌐 Timezone")
     common_timezones = pytz.common_timezones; default_tz_sidebar = 'US/Eastern'
@@ -130,13 +99,38 @@ economic_df_master, data_status_message = load_economic_data(st.session_state.st
 
 with st.sidebar:
     st.subheader("💱 Currencies")
-    if not economic_df_master.empty and 'Currency' in economic_df_master.columns: available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
-    else: available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"]
+    if not economic_df_master.empty and 'Currency' in economic_df_master.columns:
+        available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
+    else:
+        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] # Fallback
     currency_options = ["All"] + available_currencies
-    if 'selected_currencies_filter' not in st.session_state: st.session_state.selected_currencies_filter = ["All"]
-    current_currency_selection = st.session_state.selected_currencies_filter; valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]; default_currency_sel = valid_current_selection_curr if valid_current_selection_curr else ["All"]
-    selected_currencies = st.multiselect("Filter Currencies:", options=currency_options, default=default_currency_sel, key="selected_currencies_widget_updated", help="Select currencies.")
+
+    # --- MODIFIED DEFAULT LOGIC ---
+    # Default to USD if available, otherwise All
+    default_initial_selection = ["USD"] if "USD" in available_currencies else ["All"]
+
+    if 'selected_currencies_filter' not in st.session_state:
+        st.session_state.selected_currencies_filter = default_initial_selection
+
+    # Ensure current selection in session state is valid, otherwise use the initial default
+    current_currency_selection = st.session_state.selected_currencies_filter
+    # Filter selection to only include options currently available
+    valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]
+    # The default for the multiselect widget should be the validated current selection.
+    # If the validated selection is empty (e.g., state had an invalid value), fall back to the initial default.
+    default_for_widget = valid_current_selection_curr if valid_current_selection_curr else default_initial_selection
+    # --- END MODIFIED DEFAULT LOGIC ---
+
+    selected_currencies = st.multiselect(
+        "Filter Currencies:",
+        options=currency_options,
+        default=default_for_widget, # Use the calculated default
+        key="selected_currencies_widget_updated",
+        help="Select currencies to filter events."
+    )
+    # Always update session state with the latest selection from the widget
     st.session_state.selected_currencies_filter = selected_currencies
+
 
     st.subheader("⚡ Impact Level")
     impact_level_options_std = ["High", "Medium", "Low"]
