@@ -88,9 +88,6 @@ with st.sidebar:
     st.session_state.selected_currencies_filter = selected_currencies
 
     st.subheader("⚡ Impact Level")
-    # !!! IMPORTANT: Check THIS SECTION in YOUR app.py file carefully !!!
-    # The unwanted debug output appears before the "Filter Impact:" multiselect.
-    # Ensure there are NO st.write() or print() statements here in your local file.
     impact_level_options_std = ["High", "Medium", "Low"]
     if not economic_df_master.empty and 'Impact' in economic_df_master.columns:
         data_impact_values = sorted([str(imp) for imp in economic_df_master['Impact'].unique() if pd.notna(imp) and str(imp) != 'N/A'])
@@ -100,28 +97,11 @@ with st.sidebar:
         impact_filter_options = ["All"] + (combined_impact_options if combined_impact_options else impact_level_options_std)
     else:
         impact_filter_options = ["All"] + impact_level_options_std
-
     if 'selected_impact_filter' not in st.session_state:
         st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
-
-    current_impact_selection = st.session_state.selected_impact_filter
-    valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
-    default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else (["High"] if "High" in impact_filter_options else ["All"])
-    
-    # Example of what to look for and REMOVE in your file if it exists:
-    # st.write(current_impact_selection)  # <--- REMOVE THIS IF PRESENT
-    # print(default_impact_sel)           # <--- REMOVE THIS IF PRESENT
-    # st.write(impact_filter_options)     # <--- REMOVE THIS IF PRESENT
-
-    selected_impacts = st.multiselect(
-        "Filter Impact:",
-        options=impact_filter_options,
-        default=default_impact_sel,
-        key="selected_impact_widget",
-        help="Select impact levels to filter events."
-    )
+    current_impact_selection = st.session_state.selected_impact_filter; valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]; default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else (["High"] if "High" in impact_filter_options else ["All"])
+    selected_impacts = st.multiselect("Filter Impact:", options=impact_filter_options, default=default_impact_sel, key="selected_impact_widget", help="Select impact levels.")
     st.session_state.selected_impact_filter = selected_impacts
-    # !!! End of section to check carefully !!!
 
     st.markdown("---")
     st.caption(f"Calendar Status: {data_status_message}")
@@ -219,12 +199,33 @@ else:
             if user_qual_sentiment == "Hawkish": res_color = "#28a745"
             elif user_qual_sentiment == "Dovish": res_color = "#dc3545"
             st.markdown(f"<div class='custom-info-box' style='border-left-color: {res_color};'><strong>Summary:</strong> {ai_analysis_result.get('summary', 'N/A')}</div>", unsafe_allow_html=True)
+            
             cols_ai = st.columns(2)
             with cols_ai[0]:
-                st.markdown("**Potential Bullish Points:**"); [st.markdown(f"- {pt}") for pt in ai_analysis_result.get("bullish_points", [])] if ai_analysis_result.get("bullish_points") else st.caption("N/A")
+                st.markdown("**Potential Bullish Points:**")
+                bullish_pts = ai_analysis_result.get("bullish_points", [])
+                if bullish_pts:
+                    for pt in bullish_pts:
+                        st.markdown(f"- {pt}")
+                else:
+                    st.caption("N/A")
             with cols_ai[1]:
-                st.markdown("**Potential Bearish Points:**"); [st.markdown(f"- {pt}") for pt in ai_analysis_result.get("bearish_points", [])] if ai_analysis_result.get("bearish_points") else st.caption("N/A")
-            st.markdown("**Key Considerations & Factors:**"); [st.markdown(f"- {pt}") for pt in ai_analysis_result.get("key_considerations", [])] if ai_analysis_result.get("key_considerations") else st.caption("N/A")
+                st.markdown("**Potential Bearish Points:**")
+                bearish_pts = ai_analysis_result.get("bearish_points", [])
+                if bearish_pts:
+                    for pt in bearish_pts:
+                        st.markdown(f"- {pt}")
+                else:
+                    st.caption("N/A")
+            
+            st.markdown("**Key Considerations & Factors:**")
+            key_considerations = ai_analysis_result.get("key_considerations", [])
+            if key_considerations:
+                for pt in key_considerations:
+                    st.markdown(f"- {pt}")
+            else:
+                st.caption("N/A")
+
             st.markdown(f"<div style='font-size:0.8rem;color:#A0A0A0;margin-top:10px;'><strong>Impact Scale:</strong> {ai_analysis_result.get('potential_impact','N/A')} | <strong>AI Confidence:</strong> {ai_analysis_result.get('confidence','N/A')}</div>", unsafe_allow_html=True)
             st.caption(f"ℹ️ {ai_analysis_result.get('disclaimer', 'AI analysis is experimental.')}")
         st.markdown('</div>', unsafe_allow_html=True)
