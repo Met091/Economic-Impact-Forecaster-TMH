@@ -12,10 +12,10 @@ from strategy_engine import (
     infer_market_outlook_from_data,
     classify_actual_release,
     get_indicator_properties,
-    INDICATOR_CONFIG # Import for direct access to description
+    INDICATOR_CONFIG
 )
 from visualization import plot_historical_trend
-from ai_models import analyze_qualitative_event_llm # Import the new AI function
+from ai_models import analyze_qualitative_event_llm
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -37,13 +37,12 @@ def load_css(file_name):
         st.error(f"🚨 An error occurred while loading CSS: {e}")
 
 # --- Load Custom CSS ---
-load_css("style.css") # Assumes 'style.css' is in the same directory as app.py
+load_css("style.css")
 # --- End Custom CSS Loading ---
 
 
 # --- Helper function for timezone conversion ---
 def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"):
-    """Converts a datetime object to a target timezone and formats it."""
     if pd.isna(dt_object) or not isinstance(dt_object, datetime): return "N/A"
     try:
         target_tz = pytz.timezone(target_tz_str)
@@ -76,38 +75,22 @@ with st.sidebar:
     st.session_state.selected_timezone = selected_tz_name
     st.markdown("---")
 
-# --- Load Data ---
-# This function call is placed here so that economic_df_master is available for the subsequent sidebar elements
 economic_df_master, data_status_message = load_economic_data(st.session_state.start_date_filter, st.session_state.end_date_filter)
 
-# --- Sidebar Config (Continued) ---
-# This 'with st.sidebar:' block ensures these elements are also in the sidebar.
-# It's okay to have multiple such blocks for organization.
 with st.sidebar:
     st.subheader("💱 Currencies")
-    if not economic_df_master.empty and 'Currency' in economic_df_master.columns:
-        available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
-    else:
-        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] # Fallback
+    if not economic_df_master.empty and 'Currency' in economic_df_master.columns: available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
+    else: available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"]
     currency_options = ["All"] + available_currencies
-
-    if 'selected_currencies_filter' not in st.session_state:
-        st.session_state.selected_currencies_filter = ["All"]
-
-    current_currency_selection = st.session_state.selected_currencies_filter
-    valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]
-    default_currency_sel = valid_current_selection_curr if valid_current_selection_curr else ["All"]
-
-    selected_currencies = st.multiselect(
-        "Filter Currencies:",
-        options=currency_options,
-        default=default_currency_sel,
-        key="selected_currencies_widget_updated", # Ensure key is unique if widget is re-declared
-        help="Select currencies to filter events."
-    )
+    if 'selected_currencies_filter' not in st.session_state: st.session_state.selected_currencies_filter = ["All"]
+    current_currency_selection = st.session_state.selected_currencies_filter; valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]; default_currency_sel = valid_current_selection_curr if valid_current_selection_curr else ["All"]
+    selected_currencies = st.multiselect("Filter Currencies:", options=currency_options, default=default_currency_sel, key="selected_currencies_widget_updated", help="Select currencies.")
     st.session_state.selected_currencies_filter = selected_currencies
 
     st.subheader("⚡ Impact Level")
+    # !!! IMPORTANT: Check THIS SECTION in YOUR app.py file carefully !!!
+    # The unwanted debug output appears before the "Filter Impact:" multiselect.
+    # Ensure there are NO st.write() or print() statements here in your local file.
     impact_level_options_std = ["High", "Medium", "Low"]
     if not economic_df_master.empty and 'Impact' in economic_df_master.columns:
         data_impact_values = sorted([str(imp) for imp in economic_df_master['Impact'].unique() if pd.notna(imp) and str(imp) != 'N/A'])
@@ -125,40 +108,36 @@ with st.sidebar:
     valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
     default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else (["High"] if "High" in impact_filter_options else ["All"])
     
-    # The accidental print/write causing the NULL output was likely here or around this logic.
-    # Ensure no st.write(variable_name) or print(variable_name) is present in this section.
+    # Example of what to look for and REMOVE in your file if it exists:
+    # st.write(current_impact_selection)  # <--- REMOVE THIS IF PRESENT
+    # print(default_impact_sel)           # <--- REMOVE THIS IF PRESENT
+    # st.write(impact_filter_options)     # <--- REMOVE THIS IF PRESENT
 
     selected_impacts = st.multiselect(
         "Filter Impact:",
         options=impact_filter_options,
         default=default_impact_sel,
-        key="selected_impact_widget", # Ensure key is unique
+        key="selected_impact_widget",
         help="Select impact levels to filter events."
     )
     st.session_state.selected_impact_filter = selected_impacts
+    # !!! End of section to check carefully !!!
 
     st.markdown("---")
     st.caption(f"Calendar Status: {data_status_message}")
-    if 'ALPHA_VANTAGE_API_KEY' not in st.secrets:
-        st.caption("AV Key: ⚠️ Missing (US Historicals limited)")
-    else:
-        st.caption("AV Key: 🔑 Configured")
+    if 'ALPHA_VANTAGE_API_KEY' not in st.secrets: st.caption("AV Key: ⚠️ Missing")
+    else: st.caption("AV Key: 🔑 Configured")
     st.markdown("---")
     st.markdown("<div class='custom-info-box' style='background-color: rgba(0,123,255,0.05); border-left-color: #00A0B0;'>Tip: Use filters to narrow events. Click an event below for analysis.</div>", unsafe_allow_html=True)
 
-# --- Application Title & Info ---
 st.title("📊 Economic Impact Forecaster")
 st.markdown("<div class='app-subtitle'>Powered by <strong>Trading Mastery Hub</strong> | <em>Navigating Economic Tides with Data</em></div>", unsafe_allow_html=True)
 st.markdown("---")
 
-# --- Apply Filters ---
 economic_df_filtered = economic_df_master.copy()
-if 'Currency' in economic_df_filtered.columns and not ("All" in selected_currencies or not selected_currencies) :
-    economic_df_filtered = economic_df_filtered[economic_df_filtered['Currency'].isin(selected_currencies)]
-if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts or not selected_impacts):
-    economic_df_filtered = economic_df_filtered[economic_df_filtered['Impact'].isin(selected_impacts)]
+if 'Currency' in economic_df_filtered.columns and not ("All" in selected_currencies or not selected_currencies) : economic_df_filtered = economic_df_filtered[economic_df_filtered['Currency'].isin(selected_currencies)]
+if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts or not selected_impacts): economic_df_filtered = economic_df_filtered[economic_df_filtered['Impact'].isin(selected_impacts)]
 
-# --- Main Application Area ---
 if economic_df_master.empty:
     if "Simulated" in data_status_message: st.warning("⚠️ Displaying simulated data as live data fetch failed.")
     else: st.error("🚨 Failed to load any economic data. Check sources/network, then retry.")
@@ -218,7 +197,7 @@ else:
     prediction_pts = predict_actual_condition_for_outcome(prev_val, fcst_val, desired_outcome, cur_str, evt_name)
     outcome_colors = {"Bullish": "#28a745", "Bearish": "#dc3545", "Consolidating": "#6c757d"}
     box_color = outcome_colors.get(desired_outcome, "#6c757d")
-    pred_html_list = "".join([f"<li>{pt}</li>" for pt in prediction_pts]) # Plain text from strategy_engine
+    pred_html_list = "".join([f"<li>{pt}</li>" for pt in prediction_pts])
     st.markdown(f"<div class='custom-prediction-box' style='background-color: {box_color}; border-left: 5px solid {box_color};'><ul style='margin-bottom:0; padding-left:20px;'>{pred_html_list}</ul></div>", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
