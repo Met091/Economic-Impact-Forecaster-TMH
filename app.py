@@ -5,6 +5,7 @@ import numpy as np
 import pytz 
 from datetime import datetime, date, timedelta
 
+# Assuming these modules are in the same directory
 from data_loader import load_economic_data, load_historical_data
 from strategy_engine import (
     predict_actual_condition_for_outcome,
@@ -18,7 +19,7 @@ from visualization import plot_historical_trend
 # --- Page Configuration ---
 st.set_page_config(
     page_title="Economic Forecaster V13 (Nuanced)",
-    page_icon="🎯", # New icon
+    page_icon="🎯", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -35,7 +36,6 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
-    # ... (Sidebar configuration remains the same as V11/V12) ...
     st.header("⚙️ Configuration Filters")
     st.subheader("🗓️ Date Range")
     today = date.today(); default_start_date = today - timedelta(days=today.weekday()); default_end_date = default_start_date + timedelta(days=6)    
@@ -92,7 +92,6 @@ if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts o
 if economic_df_master.empty: pass 
 elif economic_df_filtered.empty: st.warning("⚠️ No economic events match the selected filters.")
 else:
-    # ... (Event Selection and Details layout remains the same as V11/V12) ...
     col_event_selection, col_event_details = st.columns([2, 3])
     with col_event_selection:
         st.subheader("🗓️ Select Economic Event")
@@ -124,25 +123,29 @@ else:
     tab1, tab2, tab3 = st.tabs(["🎯 Interpretation & Outlook", "📈 Historical Trends", "🔬 Simulate Actual Release"])
     # --- Tab 1: Interpretation ---
     with tab1:
-        # ... (Interpretation logic remains the same, uses the updated predict_ function) ...
         inferred_outcome = infer_market_outlook_from_data(previous_val, forecast_val, event_name_str)
         st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
         st.subheader("📊 Desired Market Outcome Analysis")
         outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
-        try: default_outcome_index = 2; 
-             if "bullish" in inferred_outcome.lower(): default_outcome_index = 0
-             elif "bearish" in inferred_outcome.lower(): default_outcome_index = 1
-        except ValueError: default_outcome_index = 2 
+        
+        # --- FIXED BLOCK ---
+        # Determine default index without unnecessary try-except
+        default_outcome_index = 2 # Default to Consolidating
+        if inferred_outcome: # Check if inferred_outcome is not None or empty
+             if "bullish" in inferred_outcome.lower(): 
+                 default_outcome_index = 0
+             elif "bearish" in inferred_outcome.lower(): 
+                 default_outcome_index = 1
+        # --- END FIXED BLOCK ---
+                 
         desired_outcome = st.radio(f"Select desired outcome for {currency_str}:", options=outcome_options_list, index=default_outcome_index, key=f"outcome_radio_main_{event_id_for_keys}", horizontal=True)
         prediction_text = predict_actual_condition_for_outcome(previous_val, forecast_val, desired_outcome, currency_str, event_name_str)
-        # Define colors for the 3 main outcomes (used for the desired outcome box)
         outcome_color_map_desired = {"Bullish": "#1E4620", "Bearish": "#541B1B", "Consolidating": "#333333"}
         bg_color_desired = outcome_color_map_desired.get(desired_outcome, "#333333")
         st.markdown(f"<div style='background-color: {bg_color_desired}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
 
     # --- Tab 2: Historical Trends ---
     with tab2: 
-        # ... (Historical Trends logic remains the same) ...
         st.header(f"Historical Trends for: {event_name_str}")
         df_hist = load_historical_data(event_name_str) 
         if not df_hist.empty:
@@ -165,33 +168,17 @@ else:
             hypothetical_actual = st.number_input(f"Hypothetical 'Actual' ({unit_sim}):", value=float(actual_input_val_default) if pd.notna(actual_input_val_default) else 0.0, step=step_value, format="%.2f", key=f"actual_input_main_{event_id_for_keys}")
             
             if st.button("Classify Hypothetical Actual", key=f"classify_btn_main_{event_id_for_keys}", use_container_width=True):
-                # Use the updated classify_actual_release function
                 classification, explanation = classify_actual_release(
                     hypothetical_actual, forecast_val, previous_val, event_name_str, currency_str
                 )
-                
-                # Define colors for the 5-level classification
-                nuanced_color_map = {
-                    "Strongly Bullish": "#145A32", # Darker Green
-                    "Mildly Bullish": "#27AE60",   # Green
-                    "Neutral/In-Line": "#808B96", # Grey
-                    "Mildly Bearish": "#E74C3C",   # Red
-                    "Strongly Bearish": "#922B21", # Darker Red
-                    "Qualitative": "#2E4053", 
-                    "Indeterminate": "#4A235A", 
-                    "Error": "#641E16"
-                }
-                class_bg_color = nuanced_color_map.get(classification, "#333333") # Fallback color
-                
-                # Display classification with color styling
+                nuanced_color_map = {"Strongly Bullish": "#145A32", "Mildly Bullish": "#27AE60", "Neutral/In-Line": "#808B96", "Mildly Bearish": "#E74C3C", "Strongly Bearish": "#922B21", "Qualitative": "#2E4053", "Indeterminate": "#4A235A", "Error": "#641E16"}
+                class_bg_color = nuanced_color_map.get(classification, "#333333") 
                 st.markdown(f"**Classification: <span style='background-color:{class_bg_color}; color:white; padding: 2px 6px; border-radius: 4px; font-weight:bold;'>{classification}</span>**", unsafe_allow_html=True)
-                # Display detailed explanation in a styled box
                 st.markdown(f"<div style='background-color: #262730; color: #FAFAFA; border: 1px solid {class_bg_color}; padding: 10px; border-radius: 5px; margin-top:5px; white-space: pre-wrap;'>{explanation}</div>", unsafe_allow_html=True)
 
     # --- Economic Calendar Overview ---
     st.markdown("---")
     with st.expander("🗓️ Full Economic Calendar Overview (Filtered - Data via investpy)", expanded=False):
-        # ... (Calendar display logic remains the same) ...
         if not economic_df_filtered.empty:
             calendar_display_df = economic_df_filtered.copy()
             if 'Timestamp' in calendar_display_df.columns and pd.api.types.is_datetime64_any_dtype(calendar_display_df['Timestamp']):
