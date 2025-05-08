@@ -18,8 +18,8 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Forecaster V13 (Debug)", # Updated title for clarity
-    page_icon="🐞", # Debug icon
+    page_title="Economic Forecaster V13 (Nuanced)",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -66,33 +66,26 @@ with st.sidebar:
     st.session_state.selected_currencies_filter = selected_currencies
 
     st.subheader("⚡ Impact Level")
-    st.write("--- DEBUG INFO START ---") # Start Debug Marker
     impact_level_options_std = ["High", "Medium", "Low"]
     if not economic_df_master.empty and 'Impact' in economic_df_master.columns:
         data_impact_values = sorted([str(imp) for imp in economic_df_master['Impact'].unique() if pd.notna(imp) and str(imp) != 'N/A'])
         combined_impact_options = []; [combined_impact_options.append(opt) for opt in impact_level_options_std if opt in data_impact_values and opt not in combined_impact_options]; [combined_impact_options.append(opt) for opt in data_impact_values if opt not in combined_impact_options]
         impact_filter_options = ["All"] + (combined_impact_options if combined_impact_options else impact_level_options_std)
     else: impact_filter_options = ["All"] + impact_level_options_std
-    st.write(f"1. Calculated `impact_filter_options`: `{impact_filter_options}`") # DEBUG PRINT 1
 
     # Initialize session state if it doesn't exist
     if 'selected_impact_filter' not in st.session_state:
-        st.write("2. Initializing `selected_impact_filter` in session state.") # DEBUG PRINT 2
         st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
-    st.write(f"3. `st.session_state.selected_impact_filter` before validation: `{st.session_state.selected_impact_filter}`") # DEBUG PRINT 3
 
     # Ensure the current session state value is valid within the options
     current_impact_selection = st.session_state.selected_impact_filter
     valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
-    st.write(f"4. `valid_current_selection_imp` (based on state): `{valid_current_selection_imp}`") # DEBUG PRINT 4
 
     # Determine the default value for the widget
     if not valid_current_selection_imp:
          default_impact_sel = ["High"] if "High" in impact_filter_options else ["All"]
-         st.write(f"5. Stored selection invalid. Resetting `default_impact_sel` to: `{default_impact_sel}`") # DEBUG PRINT 5
     else:
          default_impact_sel = valid_current_selection_imp
-         st.write(f"5. Using valid stored selection for `default_impact_sel`: `{default_impact_sel}`") # DEBUG PRINT 5
 
     selected_impacts = st.multiselect(
         "Filter Impact:",
@@ -100,28 +93,22 @@ with st.sidebar:
         default=default_impact_sel,
         key="selected_impact_widget" # Using a consistent key here
     )
-    st.write(f"6. Value returned by `st.multiselect` (`selected_impacts`): `{selected_impacts}`") # DEBUG PRINT 6
-
     # Always update session state with the latest selection from the widget
     st.session_state.selected_impact_filter = selected_impacts
-    st.write(f"7. `st.session_state.selected_impact_filter` AFTER update: `{st.session_state.selected_impact_filter}`") # DEBUG PRINT 7
-    st.write("--- DEBUG INFO END ---") # End Debug Marker
-
 
 # --- Application Title & Info ---
-st.title("🐞 Economic Impact Forecaster V13 (Debug)")
-# ... (Rest of the app remains the same) ...
+st.title("🎯 Economic Impact Forecaster V13 (Nuanced Classification)")
 st.markdown(f"Configure filters. Calendar data from **Investing.com (`investpy`)** for **{st.session_state.start_date_filter.strftime('%b %d')} - {st.session_state.end_date_filter.strftime('%b %d, %Y')}**. US Historicals via **Alpha Vantage**.")
 if 'ALPHA_VANTAGE_API_KEY' not in st.secrets: st.warning("Alpha Vantage API key missing. Real US historical data unavailable.")
 if economic_df_master.empty: st.error(f"🚨 Failed to load economic calendar data using `investpy`.")
 
 # --- Apply Filters ---
-economic_df_filtered = economic_df_master.copy() 
+economic_df_filtered = economic_df_master.copy()
 if 'Currency' in economic_df_filtered.columns and not ("All" in selected_currencies or not selected_currencies) : economic_df_filtered = economic_df_filtered[economic_df_filtered['Currency'].isin(selected_currencies)]
 if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts or not selected_impacts): economic_df_filtered = economic_df_filtered[economic_df_filtered['Impact'].isin(selected_impacts)]
 
 # --- Main Application Area ---
-if economic_df_master.empty: pass 
+if economic_df_master.empty: pass
 elif economic_df_filtered.empty: st.warning("⚠️ No economic events match the selected filters.")
 else:
     col_event_selection, col_event_details = st.columns([2, 3])
@@ -140,7 +127,7 @@ else:
     event_id_for_keys = selected_event_row.get('id', str(selected_event_row.get('EventName','')) + str(selected_event_row.get('Currency','')))
     previous_val, forecast_val, actual_val = selected_event_row.get('Previous'), selected_event_row.get('Forecast'), selected_event_row.get('Actual')
     event_name_str, currency_str, impact_str = str(selected_event_row.get('EventName', 'N/A')), str(selected_event_row.get('Currency', 'N/A')), str(selected_event_row.get('Impact', 'N/A'))
-    event_timestamp = selected_event_row.get('Timestamp'); formatted_event_time = convert_and_format_time(event_timestamp, selected_tz_name) 
+    event_timestamp = selected_event_row.get('Timestamp'); formatted_event_time = convert_and_format_time(event_timestamp, selected_tz_name)
     with col_event_details:
         st.subheader(f"🔍 Details for: {event_name_str}")
         detail_col1, detail_col2, detail_col3 = st.columns(3)
@@ -158,8 +145,8 @@ else:
         st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
         st.subheader("📊 Desired Market Outcome Analysis")
         outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
-        default_outcome_index = 2 
-        if inferred_outcome: 
+        default_outcome_index = 2
+        if inferred_outcome:
              if "bullish" in inferred_outcome.lower(): default_outcome_index = 0
              elif "bearish" in inferred_outcome.lower(): default_outcome_index = 1
         desired_outcome = st.radio(f"Select desired outcome for {currency_str}:", options=outcome_options_list, index=default_outcome_index, key=f"outcome_radio_main_{event_id_for_keys}", horizontal=True)
@@ -169,7 +156,7 @@ else:
         st.markdown(f"<div style='background-color: {bg_color_desired}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
     with tab2: # Historical Trends Tab
         st.header(f"Historical Trends for: {event_name_str}")
-        df_hist = load_historical_data(event_name_str) 
+        df_hist = load_historical_data(event_name_str)
         if not df_hist.empty:
             if 'Forecast' not in df_hist.columns and 'Previous' not in df_hist.columns and 'Actual' in df_hist.columns: st.caption(f"Displaying real historical 'Actual' values from Alpha Vantage for {event_name_str} (US Data).")
             else: st.caption(f"Displaying sample historical data for {event_name_str}.")
@@ -187,7 +174,7 @@ else:
             if st.button("Classify Hypothetical Actual", key=f"classify_btn_main_{event_id_for_keys}", use_container_width=True):
                 classification, explanation = classify_actual_release(hypothetical_actual, forecast_val, previous_val, event_name_str, currency_str)
                 nuanced_color_map = {"Strongly Bullish": "#145A32", "Mildly Bullish": "#27AE60", "Neutral/In-Line": "#808B96", "Mildly Bearish": "#E74C3C", "Strongly Bearish": "#922B21", "Qualitative": "#2E4053", "Indeterminate": "#4A235A", "Error": "#641E16"}
-                class_bg_color = nuanced_color_map.get(classification, "#333333") 
+                class_bg_color = nuanced_color_map.get(classification, "#333333")
                 st.markdown(f"**Classification: <span style='background-color:{class_bg_color}; color:white; padding: 2px 6px; border-radius: 4px; font-weight:bold;'>{classification}</span>**", unsafe_allow_html=True)
                 st.markdown(f"<div style='background-color: #262730; color: #FAFAFA; border: 1px solid {class_bg_color}; padding: 10px; border-radius: 5px; margin-top:5px; white-space: pre-wrap;'>{explanation}</div>", unsafe_allow_html=True)
     st.markdown("---")
@@ -195,7 +182,7 @@ else:
         if not economic_df_filtered.empty:
             calendar_display_df = economic_df_filtered.copy()
             if 'Timestamp' in calendar_display_df.columns and pd.api.types.is_datetime64_any_dtype(calendar_display_df['Timestamp']):
-                calendar_display_df['FormattedTimestamp'] = calendar_display_df['Timestamp'].apply(lambda x: convert_and_format_time(x, selected_tz_name)) 
+                calendar_display_df['FormattedTimestamp'] = calendar_display_df['Timestamp'].apply(lambda x: convert_and_format_time(x, selected_tz_name))
                 display_cols = ['FormattedTimestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast', 'Actual', 'Zone']
                 calendar_display_df = calendar_display_df[[col for col in display_cols if col in calendar_display_df.columns]]
                 calendar_display_df.rename(columns={'FormattedTimestamp': 'Time', 'EventName': 'Event Name'}, inplace=True)
