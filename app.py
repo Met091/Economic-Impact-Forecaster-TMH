@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pytz 
-from datetime import datetime, date, timedelta # Added date, timedelta
+from datetime import datetime, date, timedelta
 
 # Assuming these modules are in the same directory
 from data_loader import load_economic_data, load_historical_data
@@ -18,15 +18,14 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Impact Forecaster V9 (Date Range)",
-    page_icon="📅",
+    page_title="Economic Impact Forecaster V10 (Impact Filter)",
+    page_icon="⚡", # New icon
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # --- Helper function for timezone conversion ---
 def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %H:%M %Z"):
-    # ... (function remains the same as V8) ...
     if pd.isna(dt_object) or not isinstance(dt_object, datetime):
         return "N/A"
     try:
@@ -39,17 +38,14 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %H:%M %Z"):
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("⚙️ Configuration Filters")
 
     # --- Date Range Selection ---
-    st.subheader("🗓️ Date Range for Calendar")
-    today = date.today() # Current date: Thursday, May 8, 2025
-    
-    # Default: Current Week (Monday to Sunday)
-    default_start_date = today - timedelta(days=today.weekday()) # Monday: 2025-05-05
-    default_end_date = default_start_date + timedelta(days=6)    # Sunday: 2025-05-11
+    st.subheader("🗓️ Date Range")
+    today = date.today()
+    default_start_date = today - timedelta(days=today.weekday()) 
+    default_end_date = default_start_date + timedelta(days=6)    
 
-    # Initialize session state for dates if not already set
     if 'start_date_filter' not in st.session_state:
         st.session_state.start_date_filter = default_start_date
     if 'end_date_filter' not in st.session_state:
@@ -58,114 +54,136 @@ with st.sidebar:
     col_start_date, col_end_date = st.columns(2)
     with col_start_date:
         start_date_input = st.date_input(
-            "Start Date", 
+            "Start", # Shortened label
             value=st.session_state.start_date_filter,
             key="start_date_widget"
         )
     with col_end_date:
         end_date_input = st.date_input(
-            "End Date", 
+            "End", # Shortened label
             value=st.session_state.end_date_filter,
-            min_value=start_date_input, # End date cannot be before start date
+            min_value=start_date_input,
             key="end_date_widget"
         )
-    
-    # Update session state with new selections
     st.session_state.start_date_filter = start_date_input
     st.session_state.end_date_filter = end_date_input
 
     # --- Timezone Selection ---
     st.subheader("🌐 Timezone")
-    # ... (Timezone selection code remains the same as V8) ...
     common_timezones = pytz.common_timezones
     default_tz_sidebar = 'US/Eastern' 
     if 'selected_timezone' not in st.session_state:
         st.session_state.selected_timezone = default_tz_sidebar
     selected_tz_name = st.selectbox(
-        "Display Timezone:", # Shortened label
+        "Display Timezone:",
         options=common_timezones,
         index=common_timezones.index(st.session_state.selected_timezone) if st.session_state.selected_timezone in common_timezones else common_timezones.index(default_tz_sidebar),
         key="selected_timezone_widget"
     )
     st.session_state.selected_timezone = selected_tz_name
 
-    # --- Currency Filter ---
-    st.subheader("💱 Currency Filter")
-    # ... (Currency filter code remains the same, but available_currencies will be based on newly fetched data) ...
-    # Note: available_currencies will be populated after data is loaded.
-    # This means the currency filter options might briefly be out of sync if data changes significantly.
-    # For a more robust solution, one might update currency options after data load.
-
 # --- Load Data based on selected date range ---
-# Pass the selected dates from session state to the data loader
-# st.info message moved here to show what dates are being used for fetching
-st.info(f"Fetching economic data from {st.session_state.start_date_filter.strftime('%Y-%m-%d')} to {st.session_state.end_date_filter.strftime('%Y-%m-%d')}...")
+# This call happens after date inputs are processed.
 economic_df_master = load_economic_data(st.session_state.start_date_filter, st.session_state.end_date_filter)
 
-# --- Update Currency Filter Options based on loaded data ---
-with st.sidebar: # Re-enter sidebar context to update currency filter
+# --- Sidebar Configuration (Continued - Filters that depend on loaded data) ---
+with st.sidebar:
+    # --- Currency Filter ---
+    st.subheader("💱 Currencies")
     if not economic_df_master.empty and 'Currency' in economic_df_master.columns:
         available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
     else: 
-        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] # Fallback
-
-    currency_options = ["All Currencies"] + available_currencies
+        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] 
+    currency_options = ["All"] + available_currencies # "All" instead of "All Currencies" for brevity
     
-    # Preserve previous selection if possible, otherwise default
-    current_currency_selection = st.session_state.get('selected_currencies_filter', ["All Currencies"])
-    valid_current_selection = [c for c in current_currency_selection if c in currency_options]
-    if not valid_current_selection and "All Currencies" not in current_currency_selection : # if previous selection is no longer valid
-        default_currency_selection = ["All Currencies"]
-    elif not valid_current_selection and "All Currencies" in current_currency_selection:
-         default_currency_selection = ["All Currencies"]
-    elif not valid_current_selection: # if empty
-        default_currency_selection = ["All Currencies"]
-    else:
-        default_currency_selection = valid_current_selection
+    if 'selected_currencies_filter' not in st.session_state:
+        st.session_state.selected_currencies_filter = ["All"]
 
+    # Preserve selection if valid, else default
+    current_currency_selection = st.session_state.selected_currencies_filter
+    valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]
+    default_currency_sel = valid_current_selection_curr if valid_current_selection_curr else ["All"]
 
     selected_currencies = st.multiselect(
-        "Select Currencies:",
+        "Filter Currencies:",
         options=currency_options,
-        default=default_currency_selection, # Use the potentially updated default
-        key="selected_currencies_widget_updated" # Use a new key if re-rendering, or manage state carefully
+        default=default_currency_sel,
+        key="selected_currencies_widget_updated"
     )
     st.session_state.selected_currencies_filter = selected_currencies
 
+    # --- Impact Filter ---
+    st.subheader("⚡ Impact Level")
+    # Define standard impact levels or get from data
+    impact_level_options = ["High", "Medium", "Low"] # Standardized
+    if not economic_df_master.empty and 'Impact' in economic_df_master.columns:
+        # Dynamically get unique impact values if they differ from standard
+        # This ensures filter options match data if investpy changes its output
+        data_impact_values = sorted([str(imp) for imp in economic_df_master['Impact'].unique() if pd.notna(imp) and str(imp) != 'N/A'])
+        # Combine standard with data values, ensuring no duplicates and preserving order
+        combined_impact_options = []
+        for opt in impact_level_options:
+            if opt in data_impact_values and opt not in combined_impact_options:
+                combined_impact_options.append(opt)
+        for opt in data_impact_values:
+            if opt not in combined_impact_options:
+                 combined_impact_options.append(opt)
+        if not combined_impact_options: # Fallback if no impact data
+            combined_impact_options = impact_level_options
+        impact_filter_options = ["All"] + combined_impact_options
+    else:
+        impact_filter_options = ["All"] + impact_level_options
+
+    if 'selected_impact_filter' not in st.session_state:
+        st.session_state.selected_impact_filter = ["High"] # Default to High
+
+    # Preserve selection if valid, else default
+    current_impact_selection = st.session_state.selected_impact_filter
+    valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
+    default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else ["High"]
+
+
+    selected_impacts = st.multiselect(
+        "Filter Impact:",
+        options=impact_filter_options,
+        default=default_impact_sel,
+        key="selected_impact_widget"
+    )
+    st.session_state.selected_impact_filter = selected_impacts
+
 
 # --- Application Title ---
-st.title("📅 Economic Impact Forecaster V9 (Date Range)") # Updated title
+st.title("⚡ Economic Impact Forecaster V10 (Impact Filter)")
 st.markdown("""
-Select date range, timezone, and currency preferences. Then, choose an economic event to analyze.
-**Calendar data is fetched from Investing.com using `investpy`. This method relies on web scraping and may be unstable.**
+Configure date range, timezone, currency, and impact filters. Then, choose an event to analyze.
+**Calendar data is fetched from Investing.com using `investpy` (unofficial, may be unstable).**
 """)
-if economic_df_master.empty: # Check after attempting to load with selected dates
-    st.error("🚨 Failed to load economic data for the selected date range using `investpy`. Investing.com might be temporarily unavailable, its website structure may have changed, or there might be a network issue. Please try different dates or try again later.")
+if economic_df_master.empty:
+    st.error(f"🚨 Failed to load economic data for {st.session_state.start_date_filter.strftime('%Y-%m-%d')} to {st.session_state.end_date_filter.strftime('%Y-%m-%d')} using `investpy`. Investing.com might be unavailable or its website structure may have changed. Please try different dates or try again later.")
 
+# --- Apply Filters to DataFrame ---
+economic_df_filtered = economic_df_master.copy() # Start with a copy of the master for the selected date range
 
-# --- Filter DataFrame ---
-# ... (Filtering logic remains the same as V8) ...
-if not economic_df_master.empty:
-    if "All Currencies" in selected_currencies or not selected_currencies:
-        economic_df_filtered = economic_df_master.copy()
-    else:
-        if 'Currency' in economic_df_master.columns:
-            economic_df_filtered = economic_df_master[economic_df_master['Currency'].isin(selected_currencies)].copy()
-        else:
-            st.warning("Currency information not available in the fetched data to apply filter.")
-            economic_df_filtered = economic_df_master.copy()
-else:
-    economic_df_filtered = pd.DataFrame() 
+# Apply Currency Filter
+if 'Currency' in economic_df_filtered.columns and not ("All" in selected_currencies or not selected_currencies) :
+    economic_df_filtered = economic_df_filtered[economic_df_filtered['Currency'].isin(selected_currencies)]
+
+# Apply Impact Filter
+if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts or not selected_impacts):
+    # Ensure comparison is case-insensitive if needed, though investpy impact is mapped
+    economic_df_filtered = economic_df_filtered[economic_df_filtered['Impact'].isin(selected_impacts)]
 
 
 # --- Main Application Area ---
-# ... (Rest of the main app layout and tab logic remains largely the same as V8) ...
 if economic_df_master.empty:
-    pass # Error message already shown above
+    pass 
 elif economic_df_filtered.empty:
-    st.warning("⚠️ No economic events match the selected filters. Please adjust your Date Range, Timezone, or Currency selection.")
+    st.warning("⚠️ No economic events match the selected filters (Date Range, Currency, Impact). Please adjust your selections.")
 else:
-    # ... (Event Selection, Details, Tabs, Calendar Overview as in V8) ...
+    # ... (Event Selection, Details, Tabs, Calendar Overview as in V9) ...
+    # Ensure keys for widgets within loops or conditional rendering are unique, 
+    # often by incorporating the event's unique ID (from `selected_event_row.get('id', some_fallback_id)`)
+
     col_event_selection, col_event_details = st.columns([2, 3])
 
     with col_event_selection:
@@ -174,7 +192,7 @@ else:
             economic_df_filtered['display_name'] = economic_df_filtered.apply(
                 lambda row: (f"{convert_and_format_time(row['Timestamp'], selected_tz_name, '%Y-%m-%d %H:%M')} "
                              f"({pytz.timezone(selected_tz_name).localize(datetime.now()).strftime('%Z')}) - "
-                             f"{row.get('Currency','N/A')} - {row.get('EventName','Unknown Event')}")
+                             f"{row.get('Currency','N/A')} - {row.get('Impact','N/A')} - {row.get('EventName','Unknown Event')}") # Added Impact to display name
                 if pd.notna(row.get('EventName')) else f"Invalid Event Data @ {convert_and_format_time(row.get('Timestamp'), selected_tz_name)}",
                 axis=1
             )
@@ -187,25 +205,29 @@ else:
         event_options = economic_df_filtered['display_name'].tolist()
 
         current_event_selection_key = "current_event_selectbox_main"
-        if current_event_selection_key not in st.session_state or st.session_state[current_event_selection_key] not in event_options:
-            st.session_state[current_event_selection_key] = event_options[0] if event_options else None
+        # Reset selectbox if its current value is not in the new options, or if options are empty
+        if not event_options:
+             st.session_state[current_event_selection_key] = None
+        elif current_event_selection_key not in st.session_state or st.session_state[current_event_selection_key] not in event_options:
+            st.session_state[current_event_selection_key] = event_options[0]
         
         selected_event_display_name = st.selectbox(
             "Choose an event from the filtered list:",
-            options=event_options, key=current_event_selection_key, label_visibility="collapsed"
+            options=event_options, 
+            key=current_event_selection_key, 
+            label_visibility="collapsed",
+            index=0 if not event_options or st.session_state[current_event_selection_key] is None else event_options.index(st.session_state[current_event_selection_key]) # Ensure valid index
         )
 
-    if selected_event_display_name is None or selected_event_display_name.startswith("Invalid Event Data") or selected_event_display_name.startswith("Data Error"):
-        st.error("🚨 No valid event selected or available with current filters. Please check data source or filters.")
-        if not event_options: # If there are truly no options, stop to prevent errors.
-             st.stop()
-        else: # If there are options but none selected (shouldn't happen with default), try to recover or stop.
-             selected_event_display_name = event_options[0] # Attempt to pick first valid one
-             if selected_event_display_name is None: st.stop()
-
+    if not event_options or selected_event_display_name is None or selected_event_display_name.startswith("Invalid Event Data") or selected_event_display_name.startswith("Data Error"):
+        st.error("🚨 No valid event selected or available with current filters. Please adjust filters.")
+        st.stop() # Stop execution if no valid event can be processed
 
     selected_event_row = economic_df_filtered[economic_df_filtered['display_name'] == selected_event_display_name].iloc[0]
     
+    # Use .get() for all fields from selected_event_row for robustness
+    event_id_for_keys = selected_event_row.get('id', str(selected_event_row.get('EventName','')) + str(selected_event_row.get('Currency','')))
+
     previous_val = selected_event_row.get('Previous')
     forecast_val = selected_event_row.get('Forecast')
     actual_val = selected_event_row.get('Actual') 
@@ -217,6 +239,7 @@ else:
 
     with col_event_details:
         st.subheader(f"🔍 Details for: {event_name_str}")
+        # ... (Metrics display as before) ...
         detail_col1, detail_col2, detail_col3 = st.columns(3)
         with detail_col1:
             st.metric(label="Currency", value=currency_str)
@@ -237,7 +260,7 @@ else:
     tab1, tab2, tab3 = st.tabs(["🎯 Interpretation & Outlook", "📈 Historical Trends (Sample)", "🔬 Simulate Actual Release"])
 
     with tab1:
-        # ... (Tab 1 logic as before) ...
+        # ... (Tab 1 logic as before, using event_id_for_keys for unique radio button key) ...
         inferred_outcome = infer_market_outlook_from_data(
             previous_val, forecast_val, event_name_str
         )
@@ -253,7 +276,7 @@ else:
         desired_outcome = st.radio(
             f"Select desired outcome for {currency_str} to analyze:",
             options=outcome_options_list, index=default_outcome_index,
-            key=f"outcome_radio_main_{selected_event_row.get('id', event_name_str + currency_str)}",
+            key=f"outcome_radio_main_{event_id_for_keys}",
             horizontal=True
         )
         prediction_text = predict_actual_condition_for_outcome(
@@ -279,7 +302,7 @@ else:
             st.info(f"No specific sample historical data found for '{event_name_str}'.")
 
     with tab3:
-        # ... (Tab 3 logic as before) ...
+        # ... (Tab 3 logic as before, using event_id_for_keys for unique widget keys) ...
         st.header(f"Simulate Actual Release Impact for: {event_name_str}")
         st.markdown("Enter a hypothetical 'Actual' value to see how it might be classified.")
         indicator_props_sim = get_indicator_properties(event_name_str)
@@ -294,10 +317,10 @@ else:
                 f"Enter Hypothetical 'Actual' Value ({unit_sim}):",
                 value=float(actual_input_val_default) if pd.notna(actual_input_val_default) else 0.0,
                 step=step_value, format="%.2f", 
-                key=f"actual_input_main_{selected_event_row.get('id', event_name_str + currency_str)}"
+                key=f"actual_input_main_{event_id_for_keys}"
             )
             if st.button("Classify Hypothetical Actual", 
-                         key=f"classify_btn_main_{selected_event_row.get('id', event_name_str + currency_str)}", 
+                         key=f"classify_btn_main_{event_id_for_keys}", 
                          use_container_width=True):
                 classification, explanation = classify_actual_release(
                     hypothetical_actual, forecast_val, previous_val, event_name_str, currency_str
@@ -308,7 +331,7 @@ else:
 
 
     st.markdown("---")
-    with st.expander("🗓️ Full Economic Calendar Overview (Data via investpy)", expanded=False):
+    with st.expander("🗓️ Full Economic Calendar Overview (Filtered - Data via investpy)", expanded=False):
         # ... (Calendar overview logic as before) ...
         if not economic_df_filtered.empty:
             calendar_display_df = economic_df_filtered.copy()
