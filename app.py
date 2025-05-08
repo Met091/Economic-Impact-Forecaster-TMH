@@ -60,64 +60,63 @@ with st.sidebar:
     st.markdown("---")
 
     st.subheader("🗓️ Date Range")
-    
+
     # Get today's date dynamically
     # For consistency with user's context, using May 8, 2025 as "today"
     # In a live app, date.today() would be used.
     # today_date_obj = date.today() # Use this for a live app
     today_date_obj = date(2025, 5, 8) # As per user context
     tomorrow_date_obj = today_date_obj + timedelta(days=1)
+    # Calculate current week's Monday and Sunday
+    start_of_week = today_date_obj - timedelta(days=today_date_obj.weekday()) # Monday is 0
+    end_of_week = start_of_week + timedelta(days=6) # Sunday
 
     # Initialize session state for dates if not already set
     if 'start_date_filter' not in st.session_state:
-        # Default to current week's Monday
-        st.session_state.start_date_filter = today_date_obj - timedelta(days=today_date_obj.weekday())
+        st.session_state.start_date_filter = start_of_week # Default to current week's Monday
     if 'end_date_filter' not in st.session_state:
-        # Default to current week's Sunday
-        st.session_state.end_date_filter = st.session_state.start_date_filter + timedelta(days=6)
+        st.session_state.end_date_filter = end_of_week # Default to current week's Sunday
 
-    # Callback function for the button
+    # Callback functions for the buttons
     def set_date_to_today_tomorrow():
         st.session_state.start_date_filter = today_date_obj
         st.session_state.end_date_filter = tomorrow_date_obj
-        # The date_input widgets will automatically update because their 'value'
-        # is tied to these session_state variables. A rerun is triggered by the button.
+
+    def set_date_to_current_week():
+        st.session_state.start_date_filter = start_of_week
+        st.session_state.end_date_filter = end_of_week
 
     # Date input widgets
     col_start_date, col_end_date = st.columns(2)
     with col_start_date:
         start_date_input = st.date_input(
             "Start",
-            value=st.session_state.start_date_filter, # Use session state for value
-            key="start_date_widget", # Key for the widget itself
+            value=st.session_state.start_date_filter,
+            key="start_date_widget",
             help="Select the start date."
         )
     with col_end_date:
         end_date_input = st.date_input(
             "End",
-            value=st.session_state.end_date_filter, # Use session state for value
-            min_value=st.session_state.start_date_filter, # Ensure end_date >= start_date
-            key="end_date_widget", # Key for the widget itself
+            value=st.session_state.end_date_filter,
+            min_value=st.session_state.start_date_filter,
+            key="end_date_widget",
             help="Select the end date."
         )
 
     # Update session state if date inputs are changed manually
-    # This needs to happen after the button callback might have changed them
-    # and also ensures manual changes are stored.
-    # Note: Streamlit's execution model means if the button is clicked,
-    # the callback runs, then the script reruns from top.
-    # If a date_input is changed, it also causes a rerun.
-    # We only update if the widget's current value differs from session_state to avoid loops
-    # or to simply assign the current widget value to session state.
-    # A simpler way is to just assign, as the widget value is the source of truth on its change.
     if st.session_state.start_date_widget != st.session_state.start_date_filter:
          st.session_state.start_date_filter = st.session_state.start_date_widget
     if st.session_state.end_date_widget != st.session_state.end_date_filter:
          st.session_state.end_date_filter = st.session_state.end_date_widget
 
-
-    # Button to set date range to Today and Tomorrow
-    st.button("Set to Today & Tomorrow", on_click=set_date_to_today_tomorrow, use_container_width=True, key="today_tomorrow_btn")
+    # Buttons to set date range
+    # Use columns to place buttons side-by-side
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        st.button("Set to Today & Tomorrow", on_click=set_date_to_today_tomorrow, use_container_width=True, key="today_tomorrow_btn")
+    with col_btn2:
+        st.button("Set to Current Week", on_click=set_date_to_current_week, use_container_width=True, key="current_week_btn")
 
 
     st.subheader("🌐 Timezone")
