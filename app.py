@@ -18,8 +18,8 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Forecaster V13 (Nuanced)",
-    page_icon="🎯",
+    page_title="Economic Impact Forecaster Updates", # Updated Page Title
+    page_icon="📊", # Changed icon back
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -72,33 +72,16 @@ with st.sidebar:
         combined_impact_options = []; [combined_impact_options.append(opt) for opt in impact_level_options_std if opt in data_impact_values and opt not in combined_impact_options]; [combined_impact_options.append(opt) for opt in data_impact_values if opt not in combined_impact_options]
         impact_filter_options = ["All"] + (combined_impact_options if combined_impact_options else impact_level_options_std)
     else: impact_filter_options = ["All"] + impact_level_options_std
-
-    # Initialize session state if it doesn't exist
-    if 'selected_impact_filter' not in st.session_state:
-        st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
-
-    # Ensure the current session state value is valid within the options
-    current_impact_selection = st.session_state.selected_impact_filter
-    valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
-
-    # Determine the default value for the widget
-    if not valid_current_selection_imp:
-         default_impact_sel = ["High"] if "High" in impact_filter_options else ["All"]
-    else:
-         default_impact_sel = valid_current_selection_imp
-
-    selected_impacts = st.multiselect(
-        "Filter Impact:",
-        options=impact_filter_options,
-        default=default_impact_sel,
-        key="selected_impact_widget" # Using a consistent key here
-    )
-    # Always update session state with the latest selection from the widget
+    if 'selected_impact_filter' not in st.session_state: st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
+    current_impact_selection = st.session_state.selected_impact_filter; valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]; default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else ["High"] if "High" in impact_filter_options else ["All"]
+    selected_impacts = st.multiselect("Filter Impact:", options=impact_filter_options, default=default_impact_sel, key="selected_impact_widget")
     st.session_state.selected_impact_filter = selected_impacts
 
 # --- Application Title & Info ---
-st.title("🎯 Economic Impact Forecaster V13 (Nuanced Classification)")
-st.markdown(f"Configure filters. Calendar data from **Investing.com (`investpy`)** for **{st.session_state.start_date_filter.strftime('%b %d')} - {st.session_state.end_date_filter.strftime('%b %d, %Y')}**. US Historicals via **Alpha Vantage**.")
+st.title("Economic Impact Forecaster Updates") # <-- UPDATED TITLE
+st.markdown("Powered by Trading Mastery Hub") # <-- UPDATED MARKDOWN
+
+# --- Display Warnings/Errors ---
 if 'ALPHA_VANTAGE_API_KEY' not in st.secrets: st.warning("Alpha Vantage API key missing. Real US historical data unavailable.")
 if economic_df_master.empty: st.error(f"🚨 Failed to load economic calendar data using `investpy`.")
 
@@ -111,6 +94,7 @@ if 'Impact' in economic_df_filtered.columns and not ("All" in selected_impacts o
 if economic_df_master.empty: pass
 elif economic_df_filtered.empty: st.warning("⚠️ No economic events match the selected filters.")
 else:
+    # ... (Rest of the main app layout and tab logic remains the same) ...
     col_event_selection, col_event_details = st.columns([2, 3])
     with col_event_selection:
         st.subheader("🗓️ Select Economic Event")
