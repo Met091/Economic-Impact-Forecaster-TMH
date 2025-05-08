@@ -18,7 +18,7 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Forecaster V14 (Layout Fix)", # Updated Page Title
+    page_title="Economic Forecaster (Layout Fix)", # Updated Page Title
     page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
