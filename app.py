@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pytz 
+import pytz
 from datetime import datetime, date, timedelta
 
 # Assuming these modules are in the same directory
@@ -12,14 +12,14 @@ from strategy_engine import (
     infer_market_outlook_from_data,
     classify_actual_release, # Updated function
     get_indicator_properties,
-    INDICATOR_CONFIG 
+    INDICATOR_CONFIG
 )
 from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Forecaster V13 (Nuanced)",
-    page_icon="🎯", 
+    page_title="Economic Forecaster V13 (Debug)", # Updated title for clarity
+    page_icon="🐞", # Debug icon
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -29,7 +29,7 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
     if pd.isna(dt_object) or not isinstance(dt_object, datetime): return "N/A"
     try:
         target_tz = pytz.timezone(target_tz_str)
-        if dt_object.tzinfo is None or dt_object.tzinfo.utcoffset(dt_object) is None: 
+        if dt_object.tzinfo is None or dt_object.tzinfo.utcoffset(dt_object) is None:
              dt_object = pytz.utc.localize(dt_object)
         return dt_object.astimezone(target_tz).strftime(fmt)
     except Exception: return "Invalid Time"
@@ -38,7 +38,7 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
 with st.sidebar:
     st.header("⚙️ Configuration Filters")
     st.subheader("🗓️ Date Range")
-    today = date.today(); default_start_date = today - timedelta(days=today.weekday()); default_end_date = default_start_date + timedelta(days=6)    
+    today = date.today(); default_start_date = today - timedelta(days=today.weekday()); default_end_date = default_start_date + timedelta(days=6)
     if 'start_date_filter' not in st.session_state: st.session_state.start_date_filter = default_start_date
     if 'end_date_filter' not in st.session_state: st.session_state.end_date_filter = default_end_date
     col_start_date, col_end_date = st.columns(2)
@@ -46,7 +46,7 @@ with st.sidebar:
     with col_end_date: end_date_input = st.date_input("End", value=st.session_state.end_date_filter, min_value=start_date_input, key="end_date_widget")
     st.session_state.start_date_filter = start_date_input; st.session_state.end_date_filter = end_date_input
     st.subheader("🌐 Timezone")
-    common_timezones = pytz.common_timezones; default_tz_sidebar = 'US/Eastern' 
+    common_timezones = pytz.common_timezones; default_tz_sidebar = 'US/Eastern'
     if 'selected_timezone' not in st.session_state: st.session_state.selected_timezone = default_tz_sidebar
     selected_tz_name = st.selectbox("Display Timezone:", options=common_timezones, index=common_timezones.index(st.session_state.selected_timezone) if st.session_state.selected_timezone in common_timezones else common_timezones.index(default_tz_sidebar), key="selected_timezone_widget")
     st.session_state.selected_timezone = selected_tz_name
@@ -58,7 +58,7 @@ economic_df_master = load_economic_data(st.session_state.start_date_filter, st.s
 with st.sidebar:
     st.subheader("💱 Currencies")
     if not economic_df_master.empty and 'Currency' in economic_df_master.columns: available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
-    else: available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] 
+    else: available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"]
     currency_options = ["All"] + available_currencies
     if 'selected_currencies_filter' not in st.session_state: st.session_state.selected_currencies_filter = ["All"]
     current_currency_selection = st.session_state.selected_currencies_filter; valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]; default_currency_sel = valid_current_selection_curr if valid_current_selection_curr else ["All"]
@@ -66,42 +66,51 @@ with st.sidebar:
     st.session_state.selected_currencies_filter = selected_currencies
 
     st.subheader("⚡ Impact Level")
-    impact_level_options_std = ["High", "Medium", "Low"] 
+    st.write("--- DEBUG INFO START ---") # Start Debug Marker
+    impact_level_options_std = ["High", "Medium", "Low"]
     if not economic_df_master.empty and 'Impact' in economic_df_master.columns:
         data_impact_values = sorted([str(imp) for imp in economic_df_master['Impact'].unique() if pd.notna(imp) and str(imp) != 'N/A'])
         combined_impact_options = []; [combined_impact_options.append(opt) for opt in impact_level_options_std if opt in data_impact_values and opt not in combined_impact_options]; [combined_impact_options.append(opt) for opt in data_impact_values if opt not in combined_impact_options]
         impact_filter_options = ["All"] + (combined_impact_options if combined_impact_options else impact_level_options_std)
     else: impact_filter_options = ["All"] + impact_level_options_std
-    
-    # --- FIXED BLOCK for Impact Default ---
+    st.write(f"1. Calculated `impact_filter_options`: `{impact_filter_options}`") # DEBUG PRINT 1
+
     # Initialize session state if it doesn't exist
     if 'selected_impact_filter' not in st.session_state:
-        # Set default only if "High" is actually an option, otherwise default to "All"
+        st.write("2. Initializing `selected_impact_filter` in session state.") # DEBUG PRINT 2
         st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
+    st.write(f"3. `st.session_state.selected_impact_filter` before validation: `{st.session_state.selected_impact_filter}`") # DEBUG PRINT 3
 
     # Ensure the current session state value is valid within the options
     current_impact_selection = st.session_state.selected_impact_filter
     valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
-    
-    # If the stored selection is no longer valid (e.g., data changed and 'High' disappeared), reset default
+    st.write(f"4. `valid_current_selection_imp` (based on state): `{valid_current_selection_imp}`") # DEBUG PRINT 4
+
+    # Determine the default value for the widget
     if not valid_current_selection_imp:
          default_impact_sel = ["High"] if "High" in impact_filter_options else ["All"]
+         st.write(f"5. Stored selection invalid. Resetting `default_impact_sel` to: `{default_impact_sel}`") # DEBUG PRINT 5
     else:
-         default_impact_sel = valid_current_selection_imp # Use the valid stored selection
-    # --- END FIXED BLOCK ---
+         default_impact_sel = valid_current_selection_imp
+         st.write(f"5. Using valid stored selection for `default_impact_sel`: `{default_impact_sel}`") # DEBUG PRINT 5
 
     selected_impacts = st.multiselect(
         "Filter Impact:",
         options=impact_filter_options,
-        default=default_impact_sel, # Use the carefully determined default
-        key="selected_impact_widget"
+        default=default_impact_sel,
+        key="selected_impact_widget" # Using a consistent key here
     )
+    st.write(f"6. Value returned by `st.multiselect` (`selected_impacts`): `{selected_impacts}`") # DEBUG PRINT 6
+
     # Always update session state with the latest selection from the widget
     st.session_state.selected_impact_filter = selected_impacts
+    st.write(f"7. `st.session_state.selected_impact_filter` AFTER update: `{st.session_state.selected_impact_filter}`") # DEBUG PRINT 7
+    st.write("--- DEBUG INFO END ---") # End Debug Marker
+
 
 # --- Application Title & Info ---
-# ... (Rest of the app remains the same as V13 Nuanced) ...
-st.title("🎯 Economic Impact Forecaster V13 (Nuanced Classification)")
+st.title("🐞 Economic Impact Forecaster V13 (Debug)")
+# ... (Rest of the app remains the same) ...
 st.markdown(f"Configure filters. Calendar data from **Investing.com (`investpy`)** for **{st.session_state.start_date_filter.strftime('%b %d')} - {st.session_state.end_date_filter.strftime('%b %d, %Y')}**. US Historicals via **Alpha Vantage**.")
 if 'ALPHA_VANTAGE_API_KEY' not in st.secrets: st.warning("Alpha Vantage API key missing. Real US historical data unavailable.")
 if economic_df_master.empty: st.error(f"🚨 Failed to load economic calendar data using `investpy`.")
@@ -195,3 +204,4 @@ else:
         else: st.info("No events to display based on current filters or investpy data availability.")
     st.markdown("---")
     st.caption("Disclaimer: Generalized interpretations, not financial advice. Calendar: investpy (unofficial). US Historicals: Alpha Vantage. Other historicals: sample. Data accuracy depends on sources.")
+
