@@ -18,38 +18,20 @@ from visualization import plot_historical_trend
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="Economic Forecaster V14 (Improvements)",
+    page_title="Economic Forecaster V14 (Layout Fix)", # Updated Page Title
     page_icon="✨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # --- Custom CSS Injection for Metric Size ---
-# Target the specific divs used by st.metric for label and value
-# Adjust font-size values (e.g., 0.8rem, 1.5rem) as needed
 st.markdown("""
 <style>
-/* Target the label within st.metric */
-div[data-testid="stMetricLabel"] > div {
-    font-size: 0.8rem; /* Smaller label font size */
-    /* color: #A0A0A0; */ /* Optional: Slightly dimmer label color */
-}
-
-/* Target the value within st.metric */
-div[data-testid="stMetricValue"] > div {
-    font-size: 1.5rem; /* Smaller value font size */
-}
-
-/* Target the delta within st.metric (if used, though not currently for these) */
-/*
-div[data-testid="stMetricDelta"] > div {
-    font-size: 0.8rem;
-}
-*/
+div[data-testid="stMetricLabel"] > div { font-size: 0.8rem; }
+div[data-testid="stMetricValue"] > div { font-size: 1.5rem; }
 </style>
 """, unsafe_allow_html=True)
 # --- End Custom CSS ---
-
 
 # --- Helper function for timezone conversion ---
 def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"):
@@ -63,8 +45,8 @@ def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"
 
 # --- Sidebar for Configuration ---
 with st.sidebar:
-    st.header("⚙️ Configuration Filters")
     # ... (Sidebar configuration remains the same) ...
+    st.header("⚙️ Configuration Filters")
     st.subheader("🗓️ Date Range")
     today = date.today(); default_start_date = today - timedelta(days=today.weekday()); default_end_date = default_start_date + timedelta(days=6)
     if 'start_date_filter' not in st.session_state: st.session_state.start_date_filter = default_start_date
@@ -113,7 +95,7 @@ with st.sidebar:
     else: st.caption("AV Key: Configured")
 
 # --- Application Title & Info ---
-st.title("✨ Economic Impact Forecaster V14") # Reverted title slightly
+st.title("✨ Economic Impact Forecaster V14")
 st.markdown("Powered by Trading Mastery Hub")
 
 # --- Apply Filters ---
@@ -130,6 +112,7 @@ elif economic_df_filtered.empty:
 else:
     # --- Event Selection ---
     st.subheader("🗓️ Select Economic Event")
+    # ... (Event selection logic remains the same) ...
     if 'Timestamp' in economic_df_filtered.columns and pd.api.types.is_datetime64_any_dtype(economic_df_filtered['Timestamp']):
         economic_df_filtered['display_name'] = economic_df_filtered.apply(lambda row: (f"{convert_and_format_time(row['Timestamp'], selected_tz_name)} - {row.get('Currency','N/A')} - {row.get('Impact','N/A')} - {row.get('EventName','Unknown Event')}"), axis=1)
     else: economic_df_filtered['display_name'] = economic_df_filtered.apply(lambda row: f"Data Error - {row.get('Currency','N/A')} - {row.get('EventName','Unknown Event')}", axis=1); st.error("Timestamp data issue.")
@@ -148,40 +131,49 @@ else:
     event_name_str, currency_str, impact_str = str(selected_event_row.get('EventName', 'N/A')), str(selected_event_row.get('Currency', 'N/A')), str(selected_event_row.get('Impact', 'N/A'))
     event_timestamp = selected_event_row.get('Timestamp'); formatted_event_time = convert_and_format_time(event_timestamp, selected_tz_name)
 
-    st.markdown("---")
+    st.markdown("---") # Separator
 
-    # --- Event Details & Interpretation (Consolidated View) ---
-    col_details, col_interpretation = st.columns([1, 2]) # Ratio 1:2
-
-    with col_details:
-        # Details are displayed using st.metric, CSS above will resize them
-        st.subheader(f"🔍 Details: {event_name_str}")
+    # --- Event Details (Improved Layout) ---
+    st.subheader(f"🔍 Details: {event_name_str}")
+    # Use columns to group related metrics for better spacing
+    detail_cols = st.columns(4) # Use 4 columns for better distribution
+    with detail_cols[0]:
         st.metric(label="Currency", value=currency_str)
         st.metric(label="Impact", value=impact_str)
+    with detail_cols[1]:
         time_part, date_part = "N/A", formatted_event_time
         if formatted_event_time not in ["N/A", "Invalid Time"] and ' ' in formatted_event_time: parts = formatted_event_time.split(' '); date_part = parts[0]; time_part = f"{parts[1]} {parts[2]}" if len(parts) >=3 else parts[1]
-        st.metric(label="Scheduled Time", value=time_part); st.caption(f"Date: {date_part}")
+        st.metric(label="Scheduled Time", value=time_part)
+        st.caption(f"Date: {date_part}")
+    with detail_cols[2]:
         st.metric(label="Previous", value=f"{previous_val:.2f}" if pd.notna(previous_val) else "N/A")
         st.metric(label="Forecast", value=f"{forecast_val:.2f}" if pd.notna(forecast_val) else "N/A")
-        if pd.notna(actual_val): st.metric(label="Actual", value=f"{actual_val:.2f}", delta_color="off")
+    with detail_cols[3]:
+         if pd.notna(actual_val):
+             st.metric(label="Actual", value=f"{actual_val:.2f}", delta_color="off")
+         else:
+             # Optional: Add a placeholder or leave blank if no actual
+             st.metric(label="Actual", value="N/A")
 
-    with col_interpretation:
-        st.subheader("🎯 Interpretation & Outlook")
-        inferred_outcome = infer_market_outlook_from_data(previous_val, forecast_val, event_name_str)
-        st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
-        st.markdown("**Desired Market Outcome Analysis**")
-        outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
-        default_outcome_index = 2
-        if inferred_outcome:
-             if "bullish" in inferred_outcome.lower(): default_outcome_index = 0
-             elif "bearish" in inferred_outcome.lower(): default_outcome_index = 1
-        desired_outcome = st.radio(f"Select desired outcome for {currency_str}:", options=outcome_options_list, index=default_outcome_index, key=f"outcome_radio_main_{event_id_for_keys}", horizontal=True)
-        prediction_text = predict_actual_condition_for_outcome(previous_val, forecast_val, desired_outcome, currency_str, event_name_str)
-        outcome_color_map_desired = {"Bullish": "#1E4620", "Bearish": "#541B1B", "Consolidating": "#333333"}
-        bg_color_desired = outcome_color_map_desired.get(desired_outcome, "#333333")
-        st.markdown(f"<div style='background-color: {bg_color_desired}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
 
-    st.markdown("---")
+    # --- Interpretation & Outlook (Below Details) ---
+    st.subheader("🎯 Interpretation & Outlook")
+    inferred_outcome = infer_market_outlook_from_data(previous_val, forecast_val, event_name_str)
+    st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
+    st.markdown("**Desired Market Outcome Analysis**")
+    outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
+    default_outcome_index = 2
+    if inferred_outcome:
+         if "bullish" in inferred_outcome.lower(): default_outcome_index = 0
+         elif "bearish" in inferred_outcome.lower(): default_outcome_index = 1
+    desired_outcome = st.radio(f"Select desired outcome for {currency_str}:", options=outcome_options_list, index=default_outcome_index, key=f"outcome_radio_main_{event_id_for_keys}", horizontal=True)
+    prediction_text = predict_actual_condition_for_outcome(previous_val, forecast_val, desired_outcome, currency_str, event_name_str)
+    outcome_color_map_desired = {"Bullish": "#1E4620", "Bearish": "#541B1B", "Consolidating": "#333333"}
+    bg_color_desired = outcome_color_map_desired.get(desired_outcome, "#333333")
+    st.markdown(f"<div style='background-color: {bg_color_desired}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
+
+
+    st.markdown("---") # Separator before remaining tabs
 
     # --- Remaining Tabs ---
     tab2, tab3 = st.tabs(["📈 Historical Trends", "🔬 Simulate Actual Release"])
@@ -189,7 +181,7 @@ else:
     with tab2: # Historical Trends Tab
         # ... (Tab 2 logic remains the same) ...
         st.header(f"Historical Trends for: {event_name_str}")
-        is_av_source = False
+        is_av_source = False; # Determine if AV is source
         if 'ALPHA_VANTAGE_API_KEY' in st.secrets: event_to_av_map = {"Non-Farm Employment Change": {}, "Unemployment Rate": {}, "Core CPI m/m": {}, "CPI m/m": {}, "Retail Sales m/m": {}, "Real GDP": {}, "Treasury Yield": {}, "Federal Funds Rate": {}}; [is_av_source := True for key_event in event_to_av_map if key_event.lower() in event_name_str.lower()]
         df_hist = load_historical_data(event_name_str)
         if not df_hist.empty:
