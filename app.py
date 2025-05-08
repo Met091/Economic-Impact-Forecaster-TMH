@@ -72,12 +72,35 @@ with st.sidebar:
         combined_impact_options = []; [combined_impact_options.append(opt) for opt in impact_level_options_std if opt in data_impact_values and opt not in combined_impact_options]; [combined_impact_options.append(opt) for opt in data_impact_values if opt not in combined_impact_options]
         impact_filter_options = ["All"] + (combined_impact_options if combined_impact_options else impact_level_options_std)
     else: impact_filter_options = ["All"] + impact_level_options_std
-    if 'selected_impact_filter' not in st.session_state: st.session_state.selected_impact_filter = ["High"] 
-    current_impact_selection = st.session_state.selected_impact_filter; valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]; default_impact_sel = valid_current_selection_imp if valid_current_selection_imp else ["High"]
-    selected_impacts = st.multiselect("Filter Impact:", options=impact_filter_options, default=default_impact_sel, key="selected_impact_widget")
+    
+    # --- FIXED BLOCK for Impact Default ---
+    # Initialize session state if it doesn't exist
+    if 'selected_impact_filter' not in st.session_state:
+        # Set default only if "High" is actually an option, otherwise default to "All"
+        st.session_state.selected_impact_filter = ["High"] if "High" in impact_filter_options else ["All"]
+
+    # Ensure the current session state value is valid within the options
+    current_impact_selection = st.session_state.selected_impact_filter
+    valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
+    
+    # If the stored selection is no longer valid (e.g., data changed and 'High' disappeared), reset default
+    if not valid_current_selection_imp:
+         default_impact_sel = ["High"] if "High" in impact_filter_options else ["All"]
+    else:
+         default_impact_sel = valid_current_selection_imp # Use the valid stored selection
+    # --- END FIXED BLOCK ---
+
+    selected_impacts = st.multiselect(
+        "Filter Impact:",
+        options=impact_filter_options,
+        default=default_impact_sel, # Use the carefully determined default
+        key="selected_impact_widget"
+    )
+    # Always update session state with the latest selection from the widget
     st.session_state.selected_impact_filter = selected_impacts
 
 # --- Application Title & Info ---
+# ... (Rest of the app remains the same as V13 Nuanced) ...
 st.title("🎯 Economic Impact Forecaster V13 (Nuanced Classification)")
 st.markdown(f"Configure filters. Calendar data from **Investing.com (`investpy`)** for **{st.session_state.start_date_filter.strftime('%b %d')} - {st.session_state.end_date_filter.strftime('%b %d, %Y')}**. US Historicals via **Alpha Vantage**.")
 if 'ALPHA_VANTAGE_API_KEY' not in st.secrets: st.warning("Alpha Vantage API key missing. Real US historical data unavailable.")
@@ -121,31 +144,21 @@ else:
         if pd.notna(actual_val): st.metric(label="Actual", value=f"{actual_val:.2f}", delta_color="off")
     st.markdown("---")
     tab1, tab2, tab3 = st.tabs(["🎯 Interpretation & Outlook", "📈 Historical Trends", "🔬 Simulate Actual Release"])
-    # --- Tab 1: Interpretation ---
-    with tab1:
+    with tab1: # Interpretation Tab
         inferred_outcome = infer_market_outlook_from_data(previous_val, forecast_val, event_name_str)
         st.info(f"System-Inferred Bias (Forecast vs. Previous): **{inferred_outcome}** for {currency_str}")
         st.subheader("📊 Desired Market Outcome Analysis")
         outcome_options_list = ["Bullish", "Bearish", "Consolidating"]
-        
-        # --- FIXED BLOCK ---
-        # Determine default index without unnecessary try-except
-        default_outcome_index = 2 # Default to Consolidating
-        if inferred_outcome: # Check if inferred_outcome is not None or empty
-             if "bullish" in inferred_outcome.lower(): 
-                 default_outcome_index = 0
-             elif "bearish" in inferred_outcome.lower(): 
-                 default_outcome_index = 1
-        # --- END FIXED BLOCK ---
-                 
+        default_outcome_index = 2 
+        if inferred_outcome: 
+             if "bullish" in inferred_outcome.lower(): default_outcome_index = 0
+             elif "bearish" in inferred_outcome.lower(): default_outcome_index = 1
         desired_outcome = st.radio(f"Select desired outcome for {currency_str}:", options=outcome_options_list, index=default_outcome_index, key=f"outcome_radio_main_{event_id_for_keys}", horizontal=True)
         prediction_text = predict_actual_condition_for_outcome(previous_val, forecast_val, desired_outcome, currency_str, event_name_str)
         outcome_color_map_desired = {"Bullish": "#1E4620", "Bearish": "#541B1B", "Consolidating": "#333333"}
         bg_color_desired = outcome_color_map_desired.get(desired_outcome, "#333333")
         st.markdown(f"<div style='background-color: {bg_color_desired}; color: #FAFAFA; padding: 15px; border-radius: 8px; border: 1px solid #4F4F4F; margin-top:10px;'>{prediction_text}</div>", unsafe_allow_html=True)
-
-    # --- Tab 2: Historical Trends ---
-    with tab2: 
+    with tab2: # Historical Trends Tab
         st.header(f"Historical Trends for: {event_name_str}")
         df_hist = load_historical_data(event_name_str) 
         if not df_hist.empty:
@@ -153,30 +166,21 @@ else:
             else: st.caption(f"Displaying sample historical data for {event_name_str}.")
             indicator_props = get_indicator_properties(event_name_str); plot_historical_trend(df_hist, event_name_str, indicator_props.get("type", "normal"))
         else: st.info(f"No historical data found for '{event_name_str}'.")
-
-    # --- Tab 3: Simulate Actual Release ---
-    with tab3:
+    with tab3: # Simulate Actual Release Tab
         st.header(f"Simulate Actual Release Impact for: {event_name_str}")
         st.markdown("Enter a hypothetical 'Actual' value to see how it might be classified using a nuanced scale.")
         indicator_props_sim = get_indicator_properties(event_name_str)
-        unit_sim = indicator_props_sim.get("unit", "")
-        step_value = 0.1 if "%" in unit_sim else 1.0 if "K" in unit_sim else 0.01
-
+        unit_sim = indicator_props_sim.get("unit", ""); step_value = 0.1 if "%" in unit_sim else 1.0 if "K" in unit_sim else 0.01
         if indicator_props_sim["type"] == "qualitative": st.warning(f"'{event_name_str}' is qualitative. Numerical simulation not applicable.")
         else:
             actual_input_val_default = forecast_val if pd.notna(forecast_val) else (previous_val if pd.notna(previous_val) else 0.0)
             hypothetical_actual = st.number_input(f"Hypothetical 'Actual' ({unit_sim}):", value=float(actual_input_val_default) if pd.notna(actual_input_val_default) else 0.0, step=step_value, format="%.2f", key=f"actual_input_main_{event_id_for_keys}")
-            
             if st.button("Classify Hypothetical Actual", key=f"classify_btn_main_{event_id_for_keys}", use_container_width=True):
-                classification, explanation = classify_actual_release(
-                    hypothetical_actual, forecast_val, previous_val, event_name_str, currency_str
-                )
+                classification, explanation = classify_actual_release(hypothetical_actual, forecast_val, previous_val, event_name_str, currency_str)
                 nuanced_color_map = {"Strongly Bullish": "#145A32", "Mildly Bullish": "#27AE60", "Neutral/In-Line": "#808B96", "Mildly Bearish": "#E74C3C", "Strongly Bearish": "#922B21", "Qualitative": "#2E4053", "Indeterminate": "#4A235A", "Error": "#641E16"}
                 class_bg_color = nuanced_color_map.get(classification, "#333333") 
                 st.markdown(f"**Classification: <span style='background-color:{class_bg_color}; color:white; padding: 2px 6px; border-radius: 4px; font-weight:bold;'>{classification}</span>**", unsafe_allow_html=True)
                 st.markdown(f"<div style='background-color: #262730; color: #FAFAFA; border: 1px solid {class_bg_color}; padding: 10px; border-radius: 5px; margin-top:5px; white-space: pre-wrap;'>{explanation}</div>", unsafe_allow_html=True)
-
-    # --- Economic Calendar Overview ---
     st.markdown("---")
     with st.expander("🗓️ Full Economic Calendar Overview (Filtered - Data via investpy)", expanded=False):
         if not economic_df_filtered.empty:
@@ -189,8 +193,5 @@ else:
             else: calendar_display_df['Time'] = "Data Error"; display_cols_err = ['Time', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast', 'Actual', 'Zone']; calendar_display_df = calendar_display_df[[col for col in display_cols_err if col in calendar_display_df.columns]]
             st.dataframe( calendar_display_df, use_container_width=True, hide_index=True, height=400, column_config={"Time": st.column_config.TextColumn("Time", width="medium"), "Currency": st.column_config.TextColumn("CCY", width="small"),"Event Name": st.column_config.TextColumn("Event", width="large"),"Impact": st.column_config.TextColumn("Impact", width="small"),"Previous": st.column_config.NumberColumn("Prev.", format="%.2f", width="small"),"Forecast": st.column_config.NumberColumn("Fcst.", format="%.2f", width="small"),"Actual": st.column_config.NumberColumn("Actual", format="%.2f", width="small"),"Zone": st.column_config.TextColumn("Zone", width="medium"),})
         else: st.info("No events to display based on current filters or investpy data availability.")
-
-    # --- Footer ---
     st.markdown("---")
     st.caption("Disclaimer: Generalized interpretations, not financial advice. Calendar: investpy (unofficial). US Historicals: Alpha Vantage. Other historicals: sample. Data accuracy depends on sources.")
-
