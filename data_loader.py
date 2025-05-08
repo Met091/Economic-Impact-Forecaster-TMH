@@ -11,9 +11,6 @@ def load_economic_data():
     In a real application, this would fetch data from an API or database.
     """
     try:
-        # Sample data for demonstration
-        # Timestamps are strings for now, will be converted
-        # Using a slightly more diverse set of examples including None/NaN for Previous/Forecast
         base_time = datetime.now()
         data = [
             {"Timestamp": (base_time + timedelta(days=1, hours=2)).strftime("%Y-%m-%d %H:%M EST"), "Currency": "USD", "EventName": "Non-Farm Employment Change", "Impact": "High", "Previous": 175.0, "Forecast": 200.0, "Actual": np.nan},
@@ -28,22 +25,64 @@ def load_economic_data():
         
         df = pd.DataFrame(data)
         
-        # Ensure numeric columns are indeed numeric, coercing errors to NaN
         numeric_cols = ['Previous', 'Forecast', 'Actual']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
             
-        # Add a unique ID for selection if needed, using index for now
-        df['id'] = df.index
+        df['id'] = df.index # Unique ID for selection
         return df
     except Exception as e:
-        st.error(f"Error loading economic data: {e}")
-        return pd.DataFrame() # Return empty DataFrame on error
+        st.error(f"🚨 Error loading economic data: {e}")
+        return pd.DataFrame()
+
+@st.cache_data
+def load_historical_data(event_name):
+    """
+    Loads sample historical data for a given event name.
+    In a real application, this would fetch from a database or API.
+    Returns a DataFrame with 'Date', 'Actual', 'Forecast', 'Previous'.
+    """
+    all_historical_data = {
+        "Non-Farm Employment Change": pd.DataFrame({
+            'Date': pd.to_datetime([datetime.now() - timedelta(days=30*i) for i in range(6, 0, -1)]),
+            'Actual': [150.0, 220.0, 180.0, 250.0, 160.0, 175.0],
+            'Forecast': [160.0, 200.0, 190.0, 230.0, 180.0, 185.0],
+            'Previous': [140.0, 150.0, 220.0, 180.0, 250.0, 160.0]
+        }),
+        "Unemployment Rate": pd.DataFrame({
+            'Date': pd.to_datetime([datetime.now() - timedelta(days=30*i) for i in range(6, 0, -1)]),
+            'Actual': [4.0, 3.8, 3.9, 3.7, 3.9, 3.9],
+            'Forecast': [3.9, 3.8, 3.9, 3.8, 3.9, 3.9],
+            'Previous': [4.1, 4.0, 3.8, 3.9, 3.7, 3.9]
+        }),
+        "Core CPI m/m": pd.DataFrame({
+            'Date': pd.to_datetime([datetime.now() - timedelta(days=30*i) for i in range(6, 0, -1)]),
+            'Actual': [0.2, 0.4, 0.3, 0.3, 0.5, 0.3],
+            'Forecast': [0.3, 0.3, 0.3, 0.4, 0.4, 0.3],
+            'Previous': [0.1, 0.2, 0.4, 0.3, 0.3, 0.5]
+        })
+    }
+    # Find a match (case-insensitive, partial)
+    for key in all_historical_data:
+        if key.lower() in event_name.lower():
+            df = all_historical_data[key].copy()
+            df.set_index('Date', inplace=True)
+            return df
+    return pd.DataFrame() # Return empty if no specific historical data found
 
 if __name__ == '__main__':
-    # For testing the data loader independently
     sample_data = load_economic_data()
     print("Sample Economic Data:")
-    print(sample_data)
-    print("\nData Types:")
-    print(sample_data.dtypes)
+    print(sample_data.head())
+    
+    nfp_hist = load_historical_data("Non-Farm Employment Change")
+    print("\nSample NFP Historical Data:")
+    print(nfp_hist)
+
+    unemp_hist = load_historical_data("Unemployment Rate")
+    print("\nSample Unemployment Rate Historical Data:")
+    print(unemp_hist)
+
+    random_hist = load_historical_data("Some Random Event")
+    print("\nSample Random Event Historical Data (should be empty):")
+    print(random_hist)
