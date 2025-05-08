@@ -1,497 +1,643 @@
-# updated_data_loader.py
+# app.py
+import streamlit as st
 import pandas as pd
 import numpy as np
-import streamlit as st
-from datetime import datetime, timedelta, date
 import pytz
-import investpy
-import requests
-import time # For retry delay
-import logging
-import yfinance as yf
-import os
+from datetime import datetime, date, timedelta
+import logging # Import logging
 
-# --- Logging Configuration ---
-LOG_FILE_NAME = "app_data.log"
+# Assuming these modules are in the same directory
+# Ensure data_loader.py uses the version with configurable logging and yfinance ticker map
+from data_loader import load_economic_data, load_historical_data, logger as data_loader_logger
+from strategy_engine import (
+    predict_actual_condition_for_outcome,
+    infer_market_outlook_from_data,
+    classify_actual_release,
+    get_indicator_properties,
+    INDICATOR_CONFIG
+)
+from visualization import plot_historical_trend
+from ai_models import analyze_qualitative_event_llm
 
-# Determine Log Level: st.secrets > Environment Variable > Default (INFO)
-# Valid log levels: CRITICAL, ERROR, WARNING, INFO, DEBUG
-DEFAULT_LOG_LEVEL = "INFO"
-config_log_level_str = DEFAULT_LOG_LEVEL
+# --- Application Logger Setup ---
+# It's good practice for the main app to also have a logger.
+# This can be the same logger instance if configured globally, or a new one.
+# For simplicity, we can use a logger named after the app module.
+# The configuration (level, handlers) could be similar to data_loader's if desired,
+# or it could rely on data_loader.py having configured the root logger.
+# Here, we'll get a logger instance. If data_loader configured root, it might inherit.
+# If not, it will use Python's default logging settings unless configured here.
+app_logger = logging.getLogger(__name__)
+# To ensure app_logger has at least the same level as data_loader_logger if not configured separately:
+if data_loader_logger.hasHandlers():
+    app_logger.setLevel(data_loader_logger.level)
+    for handler in data_loader_logger.handlers: # Optionally, add handlers if you want app.py logs in the same file
+        if not any(isinstance(h, type(handler)) for h in app_logger.handlers): # Avoid duplicate handlers
+            # app_logger.addHandler(handler) # Uncomment if app.py logs should go to data_loader's file
+            pass 
+else: # Basic config if data_loader logger wasn't set up (e.g. running app.py standalone without full init)
+    if not app_logger.handlers: # Avoid re-adding handlers on Streamlit reruns
+        # basic_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        # basic_handler = logging.StreamHandler() # Log to console
+        # basic_handler.setFormatter(basic_formatter)
+        # app_logger.addHandler(basic_handler)
+        app_logger.setLevel(logging.INFO) # Default level for app
 
-try:
-    # Check Streamlit secrets first
-    if "LOG_LEVEL" in st.secrets:
-        config_log_level_str = str(st.secrets["LOG_LEVEL"]).upper()
-    else:
-        # Fallback to environment variable
-        env_log_level = os.environ.get("APP_LOG_LEVEL")
-        if env_log_level:
-            config_log_level_str = env_log_level.upper()
-except Exception as e:
-    # This might happen if st.secrets is not available in all contexts (e.g. testing outside Streamlit)
-    env_log_level = os.environ.get("APP_LOG_LEVEL")
-    if env_log_level:
-        config_log_level_str = env_log_level.upper()
-    # If st.secrets access fails and no env var, it will use DEFAULT_LOG_LEVEL
-
-# Validate the log level string
-numeric_level = getattr(logging, config_log_level_str, None)
-if not isinstance(numeric_level, int):
-    print(f"Warning: Invalid log level '{config_log_level_str}'. Defaulting to '{DEFAULT_LOG_LEVEL}'.")
-    config_log_level_str = DEFAULT_LOG_LEVEL
-    numeric_level = getattr(logging, config_log_level_str)
+app_logger.info("Application starting...")
 
 
-log_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s")
-logger = logging.getLogger(__name__)
-logger.setLevel(numeric_level)
+# --- Page Configuration ---
+st.set_page_config(
+    page_title="Economic Impact Forecaster",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-if not logger.handlers:
+# --- Function to Load External CSS ---
+def load_css(file_name):
+    """Loads an external CSS file into the Streamlit app."""
     try:
-        file_handler = logging.FileHandler(LOG_FILE_NAME)
-        file_handler.setFormatter(log_formatter)
-        logger.addHandler(file_handler)
+        with open(file_name) as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+        app_logger.info(f"Successfully loaded CSS file: {file_name}")
+    except FileNotFoundError:
+        app_logger.error(f"CSS File Not Found: '{file_name}'.")
+        st.error(f"🚨 CSS File Not Found: '{file_name}'. Please ensure it's in the correct directory.")
     except Exception as e:
-        st.error(f"🚨 Failed to configure file logger: {e}")
-        print(f"Error setting up file logger: {e}")
+        app_logger.error(f"An error occurred while loading CSS '{file_name}'.", exc_info=True)
+        st.error(f"🚨 An error occurred while loading CSS: {e}")
 
-    # Optional: Console Handler for local debugging or if Streamlit Cloud picks it up
-    # stream_handler = logging.StreamHandler()
-    # stream_handler.setFormatter(log_formatter)
-    # logger.addHandler(stream_handler)
+# --- Load Custom CSS ---
+load_css("style.css")
+# --- End Custom CSS Loading ---
 
-logger.info(f"Data loader module initialized. Log level set to: {config_log_level_str}")
 
-# --- Alpha Vantage API Configuration ---
-ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query"
-def get_alpha_vantage_api_key():
+# --- Helper function for timezone conversion ---
+def convert_and_format_time(dt_object, target_tz_str, fmt="%Y-%m-%d %I:%M %p %Z"):
+    if pd.isna(dt_object) or not isinstance(dt_object, datetime): return "N/A"
     try:
-        return st.secrets["ALPHA_VANTAGE_API_KEY"]
-    except (KeyError, FileNotFoundError):
-        logger.error("Alpha Vantage API key not found in st.secrets.")
-        # st.error("🚨 Alpha Vantage API key not found in secrets.") # Avoid st.error in utility if app handles it
-        return None
-
-# --- yfinance Ticker Mapping ---
-# More explicit mapping for event_name to yfinance tickers
-EVENT_TO_YFINANCE_TICKER_MAP = {
-    # Indices
-    "S&P 500 Index": "^GSPC",
-    "Dow Jones Industrial Average": "^DJI",
-    "NASDAQ Composite": "^IXIC",
-    "FTSE 100": "^FTSE",
-    "DAX PERFORMANCE-INDEX": "^GDAXI",
-    "Nikkei 225": "^N225",
-    # Commodities
-    "Crude Oil WTI Futures": "CL=F",
-    "Gold Futures": "GC=F",
-    "Silver Futures": "SI=F",
-    "Copper Futures": "HG=F",
-    # Bonds/Rates (Examples - yfinance coverage for specific yields can vary)
-    "US 10 Year Treasury Yield": "^TNX", # Treasury Yield 10 Years
-    "US 2 Year Treasury Yield": "^IRX", # Typically 13 Week Treasury Bill, adjust if specific 2Y ticker found
-    "US 30 Year Treasury Yield": "^TYX", # Treasury Yield 30 Years
-    "Federal Funds Rate": "FEDFUNDS", # FRED data, yfinance might not have direct equivalent always check
-    # Currencies (Example: EURUSD=X for exchange rates)
-    "EUR/USD Exchange Rate": "EURUSD=X",
-    "GBP/USD Exchange Rate": "GBPUSD=X",
-    "USD/JPY Exchange Rate": "USDJPY=X",
-    # Specific Economic Indicators (if a proxy ticker exists)
-    # "Philly Fed Manufacturing Index": "PATSLPHILLYFED" # Example if such a ticker existed on yfinance
-}
+        target_tz = pytz.timezone(target_tz_str)
+        if dt_object.tzinfo is None or dt_object.tzinfo.utcoffset(dt_object) is None:
+            # Attempt to localize to UTC if naive, assuming UTC if not specified
+            # This is a common case for data from various sources
+            try:
+                dt_object = pytz.utc.localize(dt_object)
+            except pytz.exceptions.AmbiguousTimeError: # Handle DST transitions if time was local
+                dt_object = pytz.utc.localize(dt_object, is_dst=None)
+            except pytz.exceptions.InvalidTimeError: # Handle DST transitions if time was local
+                 app_logger.warning(f"Could not localize naive datetime {dt_object} to UTC due to invalid time (e.g. during DST change). Treating as naive.")
 
 
-# --- Simulated Data Generation (Fallback) ---
-def generate_simulated_economic_data(start_date, end_date):
-    """Generates sample economic data for a given date range."""
-    logger.warning("Generating simulated economic calendar data as live fetch failed or was not attempted first.")
-    st.warning("⚠️ Generating simulated economic calendar data as live data fetch failed.")
-    simulated_data = []
-    current_date = start_date
-    event_counter = 0
-    base_events = [
-        {"EventName": "Simulated NFP", "Currency": "USD", "Impact": "High", "Hour": 14, "Minute": 30, "OffsetDays": 4},
-        {"EventName": "Simulated CAD Jobs", "Currency": "CAD", "Impact": "High", "Hour": 14, "Minute": 30, "OffsetDays": 4},
-        {"EventName": "Simulated US Unemp. Rate", "Currency": "USD", "Impact": "High", "Hour": 14, "Minute": 30, "OffsetDays": 4},
-        {"EventName": "Simulated GBP GDP", "Currency": "GBP", "Impact": "Medium", "Hour": 6, "Minute": 0, "OffsetDays": 1},
-        {"EventName": "Simulated EUR Speech", "Currency": "EUR", "Impact": "High", "Hour": 10, "Minute": 30, "OffsetDays": 2},
-        {"EventName": "Simulated US CPI", "Currency": "USD", "Impact": "High", "Hour": 14, "Minute": 30, "OffsetDays": 9}, # Example for a future event
-    ]
-
-    while current_date <= end_date:
-        weekday = current_date.weekday()
-        for event_template in base_events:
-            if event_template["OffsetDays"] == weekday:
-                 event_dt_naive = datetime.combine(current_date, datetime.min.time()).replace(hour=event_template["Hour"], minute=event_template["Minute"])
-                 event_dt_utc = pytz.utc.localize(event_dt_naive)
-                 simulated_data.append({
-                    "Timestamp": event_dt_utc, "Currency": event_template["Currency"],
-                    "EventName": event_template["EventName"], "Impact": event_template["Impact"],
-                    "Previous": round(np.random.uniform(-0.5, 5.0) * (100 if 'NFP' in event_template["EventName"] or 'Jobs' in event_template["EventName"] else 1), 1) if event_template["Impact"] != "High" else round(np.random.uniform(-0.1, 0.5), 1),
-                    "Forecast": round(np.random.uniform(-0.5, 5.0) * (100 if 'NFP' in event_template["EventName"] or 'Jobs' in event_template["EventName"] else 1), 1) if event_template["Impact"] != "High" else round(np.random.uniform(0.0, 0.6), 1),
-                    "Actual": np.nan, "Zone": event_template["Currency"], "id": f"sim_{event_counter}"
-                 })
-                 event_counter += 1
-        current_date += timedelta(days=1)
-        
-    if not simulated_data: return pd.DataFrame()
-    df = pd.DataFrame(simulated_data)
-    numeric_cols = ['Previous', 'Forecast', 'Actual']
-    for col in numeric_cols: df[col] = pd.to_numeric(df[col], errors='coerce')
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce', utc=True)
-    return df.sort_values(by='Timestamp').reset_index(drop=True)
-
-
-# --- investpy Data Fetching (Main Calendar) ---
-def fetch_economic_calendar_from_investpy(from_date_obj, to_date_obj, retries=2, delay=1):
-    if not isinstance(from_date_obj, date) or not isinstance(to_date_obj, date):
-        logger.error("Invalid date objects provided to fetch_economic_calendar_from_investpy.", extra={"from_date": from_date_obj, "to_date": to_date_obj})
-        # st.error("🚨 Invalid date objects provided to fetch_economic_calendar_from_investpy.")
-        return pd.DataFrame()
-    from_date_str = from_date_obj.strftime("%d/%m/%Y")
-    to_date_str = to_date_obj.strftime("%d/%m/%Y")
-    
-    logger.info(f"Attempting to fetch investpy economic calendar for {from_date_str} to {to_date_str}")
-    for attempt in range(retries + 1):
-        try:
-            logger.info(f"investpy fetch attempt {attempt + 1}/{retries + 1}")
-            df_investpy = investpy.economic_calendar(from_date=from_date_str, to_date=to_date_str)
-            
-            if df_investpy.empty:
-                logger.info("investpy returned no data for the given date range.")
-                return pd.DataFrame()
-
-            df = df_investpy.copy()
-            def create_timestamp(row):
-                try:
-                    time_str, date_str = row['time'], row['date']
-                    if time_str == 'All Day' or pd.isna(time_str): time_str = '00:00'
-                    if pd.isna(date_str): return pd.NaT
-                    return pytz.utc.localize(datetime.strptime(f"{date_str} {time_str}", "%d/%m/%Y %H:%M"))
-                except Exception as e:
-                    logger.warning(f"Failed to parse timestamp for row: {row}. Error: {e}", exc_info=False)
-                    return pd.NaT
-            df['Timestamp'] = df.apply(create_timestamp, axis=1)
-            df.dropna(subset=['Timestamp'], inplace=True)
-            if df.empty: logger.warning("All timestamps failed parsing in investpy data."); return pd.DataFrame()
-
-            column_mapping = {'zone': 'Zone', 'currency': 'Currency', 'importance': 'Impact', 'event': 'EventName', 'actual': 'Actual', 'forecast': 'Forecast', 'previous': 'Previous'}
-            df.rename(columns=column_mapping, inplace=True)
-            impact_map = {'low': 'Low', 'medium': 'Medium', 'high': 'High'}
-            df['Impact'] = df['Impact'].map(impact_map).fillna('N/A') if 'Impact' in df.columns else 'N/A'
-            
-            def clean_numeric_value(value):
-                if pd.isna(value) or value == ' ': return np.nan
-                if isinstance(value, (int, float)): return float(value)
-                text = str(value).strip().replace(' ', '').replace('$', '').replace('€', '').replace('£', '')
-                multiplier = 1
-                if 'K' in text.upper(): multiplier = 1000; text = text.upper().replace('K', '')
-                elif 'M' in text.upper(): multiplier = 1000000; text = text.upper().replace('M', '')
-                elif 'B' in text.upper(): multiplier = 1000000000; text = text.upper().replace('B', '')
-                text = text.replace('%', '')
-                try: return float(text) * multiplier
-                except ValueError: logger.debug(f"Could not parse numeric value: {value}"); return np.nan
-            numeric_cols_investpy = ['Actual', 'Forecast', 'Previous']
-            for col in numeric_cols_investpy: df[col] = df[col].apply(clean_numeric_value) if col in df.columns else np.nan
-            
-            app_columns = ['id', 'Timestamp', 'Currency', 'EventName', 'Impact', 'Previous', 'Forecast', 'Actual', 'Zone']
-            df_final = df[[col for col in app_columns if col in df.columns]].copy()
-            if 'id' not in df_final.columns: df_final['id'] = range(len(df_final))
-            
-            logger.info(f"Successfully fetched and processed {len(df_final)} events from investpy.")
-            return df_final.sort_values(by='Timestamp').reset_index(drop=True)
-
-        except (RuntimeError, ConnectionError, requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
-            logger.error(f"investpy fetch attempt {attempt + 1} failed due to network/runtime error.", exc_info=True)
-            # st.warning(f"⚠️ investpy fetch attempt {attempt + 1} failed: {e}") # App should show generic failure
-            if attempt < retries: time.sleep(delay)
-            else: # st.error(f"🚨 investpy failed after {retries + 1} attempts."); # App should show generic failure
-                  return pd.DataFrame()
-        except Exception as e:
-            logger.error(f"Unexpected error during investpy fetch attempt {attempt + 1}.", exc_info=True)
-            # st.error(f"🚨 Unexpected error during investpy fetch: {e}") # App should show generic failure
-            return pd.DataFrame()
-            
-    logger.error("investpy fetch failed after all retries.")
-    return pd.DataFrame()
-
-# --- Main Data Loading Function ---
-@st.cache_data(ttl=900)
-def load_economic_data(start_date, end_date):
-    logger.info(f"Loading economic data for range: {start_date} to {end_date}")
-    if not start_date or not end_date:
-        logger.error("Start date or end date not provided to load_economic_data.")
-        st.error("🚨 Start date or end date not provided.") # This is a critical app error
-        return pd.DataFrame(), "Error: Dates missing"
-        
-    df_live = fetch_economic_calendar_from_investpy(start_date, end_date)
-
-    if not df_live.empty:
-        status = f"Live (investpy @ {datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S %Z')})"
-        logger.info("Successfully loaded live economic data from investpy.")
-        return df_live, status
-    else:
-        logger.warning("Live data fetch from investpy failed or returned empty. Falling back to simulated data.")
-        df_simulated = generate_simulated_economic_data(start_date, end_date)
-        status = "Simulated (investpy fetch failed)"
-        if df_simulated.empty:
-             logger.warning("Simulated data generation also resulted in an empty dataset.")
-        else:
-            logger.info(f"Generated {len(df_simulated)} simulated economic events.")
-        return df_simulated, status
-
-# --- Alpha Vantage Historical Data Fetching ---
-@st.cache_data(ttl=86400) 
-def fetch_us_indicator_history_alphavantage(indicator_function_name, api_key, interval=None):
-    if not api_key:
-        logger.error("Alpha Vantage API key not provided for fetching historical data.")
-        return pd.DataFrame()
-    
-    params = {"function": indicator_function_name, "apikey": api_key, "datatype": "json"}
-    if interval and indicator_function_name in ["REAL_GDP", "CPI", "TREASURY_YIELD", "FEDERAL_FUNDS_RATE"]:
-        params["interval"] = interval
-    
-    logger.info(f"Fetching Alpha Vantage historical data for function: {indicator_function_name}, interval: {interval}")
-    try:
-        response = requests.get(ALPHA_VANTAGE_BASE_URL, params=params, timeout=15) # Added timeout
-        response.raise_for_status()
-        data = response.json()
-
-        if "Note" in data:
-            logger.warning(f"Alpha Vantage API Note (likely limit): {data['Note']}")
-            # st.warning(f"AV API limit? {data['Note']}") # Let app handle UI message if needed
-            return pd.DataFrame()
-        if "Error Message" in data:
-            logger.error(f"Alpha Vantage API Error: {data['Error Message']}")
-            # st.error(f"🚨 AV API Error: {data['Error Message']}")
-            return pd.DataFrame()
-        if not data or "data" not in data or not data["data"]:
-            logger.warning(f"No data found in Alpha Vantage response for {indicator_function_name}.")
-            return pd.DataFrame()
-
-        hist_df = pd.DataFrame(data["data"])
-        if 'date' not in hist_df.columns or 'value' not in hist_df.columns:
-            logger.error(f"Unexpected data format from Alpha Vantage (missing 'date' or 'value'): {hist_df.columns}")
-            return pd.DataFrame()
-            
-        hist_df['Date'] = pd.to_datetime(hist_df['date'])
-        hist_df['Actual'] = pd.to_numeric(hist_df['value'], errors='coerce')
-        hist_df.set_index('Date', inplace=True)
-        hist_df = hist_df[['Actual']].dropna().sort_index()
-        logger.info(f"Successfully fetched {len(hist_df)} historical data points from Alpha Vantage for {indicator_function_name}.")
-        return hist_df
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Alpha Vantage API Request Error for {indicator_function_name}.", exc_info=True)
-        # st.error(f"🚨 AV API Request Error: {e}")
-        return pd.DataFrame()
-    except ValueError as e: 
-        logger.error(f"Alpha Vantage JSON parsing error for {indicator_function_name}.", exc_info=True)
-        # st.error(f"🚨 AV JSON Error: {e}")
-        return pd.DataFrame()
+        return dt_object.astimezone(target_tz).strftime(fmt)
     except Exception as e:
-        logger.error(f"Unexpected error during Alpha Vantage fetch for {indicator_function_name}.", exc_info=True)
-        # st.error(f"🚨 Unexpected AV Error: {e}")
-        return pd.DataFrame()
+        app_logger.warning(f"Time conversion issue for an event: {dt_object}. Error: {e}", exc_info=False)
+        # st.warning(f"⚠️ Time conversion issue for an event: {e}. Displaying as 'Invalid Time'.") # Can be noisy
+        return "Invalid Time"
 
-# --- yfinance Historical Data Fetching ---
-@st.cache_data(ttl=86400)
-def fetch_yfinance_historical_data(ticker_symbol, period="2y", interval="1d"): # Added interval, increased period
-    """Fetches historical 'Close' price data for a given ticker using yfinance."""
-    logger.info(f"Attempting to fetch historical data for ticker '{ticker_symbol}' from yfinance for period '{period}', interval '{interval}'.")
+# --- Sidebar for Configuration ---
+with st.sidebar:
     try:
-        ticker = yf.Ticker(ticker_symbol)
-        hist_df = ticker.history(period=period, interval=interval)
-
-        if hist_df.empty:
-            logger.warning(f"yfinance returned no data for ticker '{ticker_symbol}'. It might be an invalid ticker or no data for the period/interval.")
-            return pd.DataFrame()
-
-        if 'Close' not in hist_df.columns:
-            logger.warning(f"'Close' column not found in yfinance data for {ticker_symbol}. Available: {hist_df.columns}")
-            return pd.DataFrame()
-
-        hist_df_standardized = hist_df[['Close']].copy()
-        hist_df_standardized.rename(columns={'Close': 'Actual'}, inplace=True)
-        hist_df_standardized.index.name = 'Date'
-        
-        if hist_df_standardized.index.tz is not None:
-             hist_df_standardized.index = hist_df_standardized.index.tz_localize(None) # Make timezone naive
-
-        logger.info(f"Successfully fetched {len(hist_df_standardized)} data points for ticker '{ticker_symbol}' from yfinance.")
-        return hist_df_standardized.sort_index()
-
+        # Attempt to load the image for the sidebar
+        st.image("https://placehold.co/300x100/0F1116/007BFF?text=Impact+Forecaster&font=roboto", use_container_width=True)
     except Exception as e:
-        logger.error(f"Error fetching or processing data for ticker '{ticker_symbol}' from yfinance.", exc_info=True)
-        return pd.DataFrame()
+        # If image loading fails, display an error message in the sidebar and log the error
+        app_logger.error("Failed to load sidebar image from placehold.co.", exc_info=True)
+        st.error(f"🚨 Sidebar image could not be loaded. Error: {e}")
 
+    st.markdown("## ⚙️ Configuration Filters")
+    st.markdown("---")
 
-# --- Load Historical Data (Main Function) ---
-def load_historical_data(event_name):
-    logger.info(f"Loading historical data for event: '{event_name}'")
-    api_key = get_alpha_vantage_api_key() # Fetch once
-    
-    # Attempt 1: Alpha Vantage (for specific US economic indicators)
-    event_to_av_map = {
-        "Non-Farm Employment Change": {"function": "NONFARM_PAYROLL", "interval": None}, # US specific
-        "Unemployment Rate": {"function": "UNEMPLOYMENT", "interval": None}, # US specific
-        "Core CPI m/m": {"function": "CPI", "interval": "monthly"}, # US specific (AV provides headline)
-        "CPI m/m": {"function": "CPI", "interval": "monthly"}, # US specific
-        "Retail Sales m/m": {"function": "RETAIL_SALES", "interval": None}, # US specific
-        "Real GDP": {"function": "REAL_GDP", "interval": "quarterly"}, # US specific
-        # "Treasury Yield": {"function": "TREASURY_YIELD", "interval": "daily"}, # Needs maturity param
-        # "Federal Funds Rate": {"function": "FEDERAL_FUNDS_RATE", "interval": "daily"}, # US specific
-    }
-    matched_av_indicator = None
-    for key_event, av_params in event_to_av_map.items():
-        if key_event.lower() in event_name.lower(): # Simple substring match
-            # Add a check for currency if available, e.g. if event is for "USD"
-            # This requires currency context to be passed or inferred for event_name
-            matched_av_indicator = av_params
-            break
-    
-    if matched_av_indicator and api_key:
-        logger.info(f"Found Alpha Vantage mapping for '{event_name}'. Function: {matched_av_indicator['function']}")
-        av_df = fetch_us_indicator_history_alphavantage(
-            matched_av_indicator["function"],
-            api_key,
-            interval=matched_av_indicator.get("interval")
+    st.subheader("🗓️ Date Range")
+    # Get today's date dynamically (using a fixed date for context consistency for now)
+    # In a real dynamic app, this would be datetime.now().date() or st.date_input default
+    today_date_obj = date(2025, 5, 8) # As per user context for consistent testing
+    tomorrow_date_obj = today_date_obj + timedelta(days=1)
+    start_of_week = today_date_obj - timedelta(days=today_date_obj.weekday())
+    end_of_week = start_of_week + timedelta(days=6)
+
+    # Initialize session state for dates if not already set
+    if 'start_date_filter' not in st.session_state:
+        st.session_state.start_date_filter = start_of_week
+        app_logger.debug("Session state 'start_date_filter' initialized.")
+    if 'end_date_filter' not in st.session_state:
+        st.session_state.end_date_filter = end_of_week
+        app_logger.debug("Session state 'end_date_filter' initialized.")
+
+    # Date preset buttons
+    def set_date_to_today_tomorrow():
+        st.session_state.start_date_filter = today_date_obj
+        st.session_state.end_date_filter = tomorrow_date_obj
+        app_logger.info("Date filter set to Today & Tomorrow.")
+    def set_date_to_current_week():
+        st.session_state.start_date_filter = start_of_week
+        st.session_state.end_date_filter = end_of_week
+        app_logger.info("Date filter set to Current Week.")
+
+    # Date input widgets
+    # Note: Directly assigning to st.session_state from widget value is usually better than using keys
+    # However, for callbacks and ensuring state persistence across reruns, explicit keying and updates are robust.
+    col_start_date, col_end_date = st.columns(2)
+    with col_start_date:
+        start_date_input = st.date_input(
+            "Start",
+            value=st.session_state.start_date_filter,
+            key="start_date_widget", # Key for the widget itself
+            help="Select start date for the economic calendar."
         )
-        if not av_df.empty:
-            logger.info(f"Successfully loaded data from Alpha Vantage for '{event_name}'.")
-            return av_df
-        else:
-            logger.warning(f"Alpha Vantage fetch was attempted for '{event_name}' but returned no data.")
+    with col_end_date:
+        end_date_input = st.date_input(
+            "End",
+            value=st.session_state.end_date_filter,
+            min_value=start_date_input, # Dynamically set min_value
+            key="end_date_widget", # Key for the widget itself
+            help="Select end date for the economic calendar."
+        )
 
-    # Attempt 2: yfinance (using explicit map first, then heuristic)
-    yf_ticker_to_try = None
-    # Check explicit map first
-    if event_name in EVENT_TO_YFINANCE_TICKER_MAP:
-        yf_ticker_to_try = EVENT_TO_YFINANCE_TICKER_MAP[event_name]
-        logger.info(f"Found direct yfinance ticker map for '{event_name}': {yf_ticker_to_try}")
+    # Update session state if date input widgets change
+    if start_date_input != st.session_state.start_date_filter:
+        st.session_state.start_date_filter = start_date_input
+        app_logger.debug(f"start_date_filter updated to: {start_date_input}")
+    if end_date_input != st.session_state.end_date_filter:
+        st.session_state.end_date_filter = end_date_input
+        app_logger.debug(f"end_date_filter updated to: {end_date_input}")
+
+
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1: st.button("Today & Tomorrow", on_click=set_date_to_today_tomorrow, use_container_width=True, key="today_tomorrow_btn")
+    with col_btn2: st.button("Current Week", on_click=set_date_to_current_week, use_container_width=True, key="current_week_btn")
+
+    st.subheader("🌐 Timezone")
+    common_timezones = sorted(pytz.common_timezones)
+    default_tz_sidebar = 'US/Eastern'
+    if 'selected_timezone' not in st.session_state:
+        st.session_state.selected_timezone = default_tz_sidebar
+        app_logger.debug("Session state 'selected_timezone' initialized.")
+
+    try:
+        default_tz_index = common_timezones.index(st.session_state.selected_timezone)
+    except ValueError:
+        app_logger.warning(f"Previously selected timezone '{st.session_state.selected_timezone}' not in common_timezones. Defaulting to '{default_tz_sidebar}'.")
+        st.session_state.selected_timezone = default_tz_sidebar # Fallback if saved TZ is somehow invalid
+        default_tz_index = common_timezones.index(default_tz_sidebar)
+
+    selected_tz_name = st.selectbox(
+        "Display Timezone:",
+        options=common_timezones,
+        index=default_tz_index,
+        key="selected_timezone_widget", # Key for the widget
+        help="Choose the timezone for displaying event times."
+    )
+    # Update session state if timezone selection changes
+    if selected_tz_name != st.session_state.selected_timezone:
+        st.session_state.selected_timezone = selected_tz_name
+        app_logger.info(f"Selected timezone updated to: {selected_tz_name}")
+
+    st.markdown("---")
+
+# Load economic data based on date filters
+# This call is outside the sidebar `with` block but uses sidebar-set session state
+economic_df_master, data_status_message = load_economic_data(
+    st.session_state.start_date_filter,
+    st.session_state.end_date_filter
+)
+app_logger.info(f"Economic data loaded. Status: {data_status_message}. Shape: {economic_df_master.shape}")
+
+
+with st.sidebar: # Continue sidebar for other filters
+    st.subheader("💱 Currencies")
+    if not economic_df_master.empty and 'Currency' in economic_df_master.columns:
+        available_currencies = sorted([curr for curr in economic_df_master['Currency'].unique() if pd.notna(curr) and curr != ''])
     else:
-        # Fallback to heuristic if no direct map (less reliable)
-        common_market_terms = ["index", "stock", "equity", "futures", "treasury", "bond", "oil", "gold", "silver", "rate"]
-        is_potential_ticker_like = any(term in event_name.lower() for term in common_market_terms) or \
-                                   (event_name.isupper() and len(event_name) < 6 and not event_name.isalpha()) or \
-                                   any(char in event_name for char in ['=','^','.'])
-        if is_potential_ticker_like:
-            yf_ticker_to_try = event_name # Use event_name itself as potential ticker
-            logger.info(f"No direct yfinance map for '{event_name}', attempting heuristic: '{yf_ticker_to_try}'")
+        available_currencies = ["USD", "EUR", "JPY", "GBP", "CAD", "AUD"] # Fallback
+    currency_options = ["All"] + available_currencies
+    app_logger.debug(f"Available currencies for filter: {available_currencies}")
+
+    default_initial_selection_curr = ["USD"] if "USD" in available_currencies else ["All"]
+    if 'selected_currencies_filter' not in st.session_state:
+        st.session_state.selected_currencies_filter = default_initial_selection_curr
+        app_logger.debug("Session state 'selected_currencies_filter' initialized.")
+
+    current_currency_selection = st.session_state.selected_currencies_filter
+    valid_current_selection_curr = [c for c in current_currency_selection if c in currency_options]
+    default_for_widget_curr = valid_current_selection_curr if valid_current_selection_curr else default_initial_selection_curr
+
+    selected_currencies = st.multiselect(
+        "Filter Currencies:",
+        options=currency_options,
+        default=default_for_widget_curr,
+        key="selected_currencies_widget", # Key for the widget
+        help="Select currencies to filter events. 'All' includes events with any or no specified currency."
+    )
+    if selected_currencies != st.session_state.selected_currencies_filter:
+        st.session_state.selected_currencies_filter = selected_currencies
+        app_logger.info(f"Selected currencies filter updated to: {selected_currencies}")
 
 
-    if yf_ticker_to_try:
-        yf_df = fetch_yfinance_historical_data(yf_ticker_to_try)
-        if not yf_df.empty:
-            logger.info(f"Successfully loaded data from yfinance for ticker '{yf_ticker_to_try}' (mapped from event '{event_name}').")
-            return yf_df
-        else:
-            logger.warning(f"yfinance fetch was attempted for '{yf_ticker_to_try}' but returned no data.")
-
-    # Attempt 3: Sample Historical Data (Fallback)
-    logger.warning(f"Failed to fetch live historical data for '{event_name}' from available sources. Falling back to sample data.")
-    today_date = datetime.now(pytz.utc).date() # Use timezone-aware date for consistency
-    sample_historical_data = {
-        # NFP (USD)
-        "Non-Farm Employment Change": pd.DataFrame({
-            'Date': pd.to_datetime([today_date - timedelta(days=30*i) for i in range(12, 0, -1)]), 
-            'Actual': [187.0, 150.0, 275.0, 216.0, 353.0, 175.0, 200.0, 220.0, 180.0, 190.0, 210.0, 205.0], 
-            'Forecast': [170.0, 180.0, 190.0, 175.0, 185.0, 200.0, 190.0, 210.0, 185.0, 195.0, 200.0, 200.0], 
-            'Previous': [165.0, 187.0, 150.0, 275.0, 216.0, 353.0, 175.0, 200.0, 220.0, 180.0, 190.0, 210.0]
-        }).set_index('Date'),
-        # Unemployment Rate (USD)
-        "Unemployment Rate": pd.DataFrame({
-            'Date': pd.to_datetime([today_date - timedelta(days=30*i) for i in range(12, 0, -1)]), 
-            'Actual': [3.8, 3.9, 3.7, 3.7, 3.7, 3.9, 3.6, 3.8, 3.7, 3.9, 3.8, 3.7], 
-            'Forecast': [3.8, 3.8, 3.8, 3.7, 3.8, 3.9, 3.7, 3.8, 3.7, 3.8, 3.8, 3.8], 
-            'Previous': [3.7, 3.8, 3.9, 3.7, 3.7, 3.7, 3.8, 3.6, 3.8, 3.7, 3.9, 3.8]
-        }).set_index('Date'),
-        # Core CPI (USD)
-        "Core CPI m/m": pd.DataFrame({
-            'Date': pd.to_datetime([today_date - timedelta(days=30*i) for i in range(12, 0, -1)]), 
-            'Actual': [0.3, 0.4, 0.4, 0.3, 0.3, 0.3, 0.2, 0.4, 0.3, 0.5, 0.3, 0.2], 
-            'Forecast': [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.4, 0.3, 0.4, 0.3, 0.3], 
-            'Previous': [0.2, 0.3, 0.4, 0.4, 0.3, 0.3, 0.3, 0.2, 0.4, 0.3, 0.5, 0.3]
-        }).set_index('Date'),
-        # Retail Sales (USD)
-        "Retail Sales m/m": pd.DataFrame({
-            'Date': pd.to_datetime([today_date - timedelta(days=30*i) for i in range(12, 0, -1)]), 
-            'Actual': [0.7, -0.8, 0.4, 0.9, -1.1, 0.6, 0.3, 0.5, -0.3, 0.8, 0.1, 0.0], 
-            'Forecast': [0.4, -0.5, 0.5, 0.6, -0.8, 0.5, 0.2, 0.4, -0.2, 0.6, 0.2, 0.1], 
-            'Previous': [-0.2, 0.7, -0.8, 0.4, 0.9, -1.1, 0.6, 0.3, 0.5, -0.3, 0.8, 0.1]
-        }).set_index('Date'),
-        # GDP (generic, could be for any major economy)
-        "GDP q/q": pd.DataFrame({ # Renamed to match a common event name format
-            'Date': pd.to_datetime([today_date - timedelta(days=90*i) for i in range(8, 0, -1)]), 
-            'Actual': [2.1, 1.8, 2.5, 2.9, 3.2, 2.0, 1.1, 0.8], 
-            'Forecast': [2.0, 1.9, 2.4, 2.7, 3.0, 2.1, 1.0, 0.9], 
-            'Previous': [1.9, 2.1, 1.8, 2.5, 2.9, 3.2, 2.0, 1.1]
-        }).set_index('Date'),
-        # PMI (generic, could be for any major economy)
-        "Manufacturing PMI": pd.DataFrame({ # Renamed for specificity
-            'Date': pd.to_datetime([today_date - timedelta(days=30*i) for i in range(12, 0, -1)]), 
-            'Actual': [50.3, 49.1, 50.9, 50.0, 52.2, 53.0, 52.8, 51.9, 50.6, 49.8, 50.1, 50.5], 
-            'Forecast': [50.1, 49.5, 50.5, 50.2, 52.0, 52.8, 52.5, 51.5, 50.5, 50.0, 50.0, 50.4], 
-            'Previous': [49.9, 50.3, 49.1, 50.9, 50.0, 52.2, 53.0, 52.8, 51.9, 50.6, 49.8, 50.1]
-        }).set_index('Date'),
-         # Example for a CAD event
-        "CAD Employment Change": pd.DataFrame({
-            'Date': pd.to_datetime([today_date - timedelta(days=30*i) for i in range(12, 0, -1)]),
-            'Actual': [10.0, 15.0, -5.0, 20.0, 12.0, 8.0, 25.0, -10.0, 18.0, 22.0, 5.0, 13.0],
-            'Forecast': [12.0, 10.0, 0.0, 18.0, 15.0, 10.0, 20.0, -8.0, 15.0, 20.0, 8.0, 15.0],
-            'Previous': [8.0, 10.0, 15.0, -5.0, 20.0, 12.0, 8.0, 25.0, -10.0, 18.0, 22.0, 5.0]
-        }).set_index('Date'),
-    }
-    # Ensure sample data index is timezone-naive
-    for key in sample_historical_data:
-        if sample_historical_data[key].index.tz is not None:
-            sample_historical_data[key].index = sample_historical_data[key].index.tz_localize(None)
+    st.subheader("⚡ Impact Level")
+    impact_level_options_std = ["High", "Medium", "Low"] # Standard order
+    if not economic_df_master.empty and 'Impact' in economic_df_master.columns:
+        # Get unique impact values from data, ensure they are strings, and handle potential NaN/None
+        data_impact_values = sorted(list(set(str(imp) for imp in economic_df_master['Impact'].unique() if pd.notna(imp) and str(imp) not in ['N/A', ''])))
+        # Combine standard options with data options, maintaining standard order first
+        combined_impact_options = []
+        for opt in impact_level_options_std:
+            if opt in data_impact_values and opt not in combined_impact_options:
+                combined_impact_options.append(opt)
+        for opt in data_impact_values:
+            if opt not in combined_impact_options: # Add any other values from data
+                combined_impact_options.append(opt)
+        impact_filter_options = ["All"] + (combined_impact_options if combined_impact_options else impact_level_options_std)
+    else:
+        impact_filter_options = ["All"] + impact_level_options_std
+    app_logger.debug(f"Available impact levels for filter: {impact_filter_options}")
 
 
-    # Try to match event_name to sample data keys
-    for key_event_sample, df_sample in sample_historical_data.items():
-        if key_event_sample.lower() in event_name.lower(): # Simple substring match
-            logger.info(f"Using sample historical data for '{event_name}' matching key '{key_event_sample}'.")
-            return df_sample.copy() # Return a copy
-            
-    logger.warning(f"No historical data (live, yfinance, or specific sample) found for '{event_name}'. Returning empty DataFrame.")
-    return pd.DataFrame()
+    default_initial_selection_imp = ["High"] if "High" in impact_filter_options else ["All"]
+    if 'selected_impact_filter' not in st.session_state:
+        st.session_state.selected_impact_filter = default_initial_selection_imp
+        app_logger.debug("Session state 'selected_impact_filter' initialized.")
 
-# --- (Optional: Add __main__ block for testing if desired) ---
-# if __name__ == '__main__':
-#     # Test logging (ensure APP_LOG_LEVEL is set in your environment or st.secrets for this to change)
-#     logger.debug("This is a debug message.")
-#     logger.info("This is an info message.")
-#     logger.warning("This is a warning message.")
-#     logger.error("This is an error message.")
-#     logger.critical("This is a critical message.")
+    current_impact_selection = st.session_state.selected_impact_filter
+    valid_current_selection_imp = [i for i in current_impact_selection if i in impact_filter_options]
+    default_for_widget_imp = valid_current_selection_imp if valid_current_selection_imp else default_initial_selection_imp
 
-#     # Test yfinance ticker mapping and data fetching
-#     print("\n--- Testing yfinance Gold Futures ---")
-#     gold_data = load_historical_data("Gold Futures")
-#     if not gold_data.empty:
-#         print(gold_data.tail())
-#     else:
-#         print("No data for Gold Futures.")
+    selected_impacts = st.multiselect(
+        "Filter Impact:",
+        options=impact_filter_options,
+        default=default_for_widget_imp,
+        key="selected_impact_widget", # Key for the widget
+        help="Select impact levels to filter events. 'All' includes events of any impact."
+    )
+    if selected_impacts != st.session_state.selected_impact_filter:
+        st.session_state.selected_impact_filter = selected_impacts
+        app_logger.info(f"Selected impact filter updated to: {selected_impacts}")
 
-#     print("\n--- Testing yfinance S&P 500 ---")
-#     sp500_data = load_historical_data("S&P 500 Index")
-#     if not sp500_data.empty:
-#         print(sp500_data.tail())
-#     else:
-#         print("No data for S&P 500 Index.")
+
+    st.markdown("---")
+    st.caption(f"Calendar Status: {data_status_message}")
+    if 'ALPHA_VANTAGE_API_KEY' not in st.secrets:
+        st.caption("AV Key: ⚠️ Missing")
+        app_logger.warning("Alpha Vantage API Key is missing from secrets.")
+    else:
+        st.caption("AV Key: 🔑 Configured")
+    st.markdown("---")
+    st.markdown("<div class='custom-info-box' style='background-color: rgba(0,123,255,0.05); border-left-color: #00A0B0;'>Tip: Use filters to narrow events. Click an event below for analysis.</div>", unsafe_allow_html=True)
+
+# --- Main Application Area ---
+st.title("📊 Economic Impact Forecaster")
+st.markdown("<div class='app-subtitle'>Powered by <strong>Trading Mastery Hub</strong> | <em>Navigating Economic Tides with Data</em></div>", unsafe_allow_html=True)
+st.markdown("---")
+
+# Apply filters to the master dataframe
+economic_df_filtered = economic_df_master.copy()
+if 'Currency' in economic_df_filtered.columns and selected_currencies and "All" not in selected_currencies:
+    economic_df_filtered = economic_df_filtered[economic_df_filtered['Currency'].isin(selected_currencies)]
+if 'Impact' in economic_df_filtered.columns and selected_impacts and "All" not in selected_impacts:
+    economic_df_filtered = economic_df_filtered[economic_df_filtered['Impact'].isin(selected_impacts)]
+
+app_logger.info(f"Data filtered. Shape after filtering: {economic_df_filtered.shape}")
+
+if economic_df_master.empty:
+    if "Simulated" in data_status_message:
+        st.warning("⚠️ Displaying simulated data as live data fetch failed. Check logs for details.")
+        app_logger.warning("Displaying simulated data due to live fetch failure.")
+    else:
+        st.error("🚨 Failed to load any economic data. Check data sources/network, then retry. Consult logs for more details.")
+        app_logger.error("Failed to load any economic data (master is empty).")
+elif economic_df_filtered.empty:
+    st.warning("⚠️ No economic events match the current filter criteria. Adjust date range or filters in the sidebar.")
+    app_logger.info("No events match current filters, displaying warning.")
+else:
+    st.markdown('<div class="content-section">', unsafe_allow_html=True)
+    st.subheader("🗓️ Select Economic Event")
+
+    # Prepare display names for the event selector
+    # Ensure Timestamp column exists and is of datetime type
+    if 'Timestamp' in economic_df_filtered.columns and pd.api.types.is_datetime64_any_dtype(economic_df_filtered['Timestamp']):
+        try:
+            economic_df_filtered['display_name'] = economic_df_filtered.apply(
+                lambda r: (f"{convert_and_format_time(r['Timestamp'], st.session_state.selected_timezone, fmt='%Y-%m-%d %I:%M %p')} | "
+                           f"{r.get('Currency','N/A')} | {r.get('Impact','N/A')} | {r.get('EventName','Unknown Event')}"),
+                axis=1
+            )
+        except Exception as e:
+            app_logger.error(f"Error creating display_name for events: {e}", exc_info=True)
+            st.error(f"🚨 Error formatting event display names: {e}")
+            economic_df_filtered['display_name'] = "Error in event display" # Fallback
+    else:
+        app_logger.error("Timestamp data issue: 'Timestamp' column missing or not datetime type in filtered data.")
+        st.error("🚨 Timestamp data issue. Event selection might be affected.")
+        economic_df_filtered['display_name'] = economic_df_filtered.apply(
+            lambda r: f"Data Error - {r.get('Currency','N/A')} - {r.get('EventName','Unknown Event')}", axis=1
+        )
+
+    event_options = economic_df_filtered.sort_values(by='Timestamp')['display_name'].tolist()
     
-#     print("\n--- Testing Non-Existent Event ---")
-#     non_existent_data = load_historical_data("Imaginary Economic Event")
-#     if non_existent_data.empty:
-#         print("Correctly returned empty DataFrame for non-existent event.")
-#     else:
-#         print("Error: Should have returned empty DataFrame.")
+    # Manage selection state for the event dropdown
+    sel_key_event_selectbox = "current_event_selectbox_main"
+    if not event_options:
+        st.session_state[sel_key_event_selectbox] = None
+        app_logger.info("No event options available for selection.")
+    elif sel_key_event_selectbox not in st.session_state or st.session_state[sel_key_event_selectbox] not in event_options:
+        st.session_state[sel_key_event_selectbox] = event_options[0] # Default to first event
+        app_logger.debug(f"Event selectbox state initialized or reset to: {event_options[0]}")
 
-#     print("\n--- Testing Sample NFP Data ---")
-#     nfp_sample = load_historical_data("Non-Farm Employment Change") # Should hit AV or sample
-#     if not nfp_sample.empty:
-#         print(nfp_sample.tail())
-#     else:
-#         print("No NFP data.")
+    selected_event_display_name = st.selectbox(
+        "Choose event:",
+        options=event_options,
+        key=sel_key_event_selectbox, # Use the managed key
+        label_visibility="collapsed",
+        index=event_options.index(st.session_state[sel_key_event_selectbox]) if st.session_state[sel_key_event_selectbox] and event_options else 0,
+        help="Select an economic event from the filtered list to view its details and analysis."
+    )
+    st.markdown('</div>', unsafe_allow_html=True) # Close content-section for selector
+
+    if not event_options or selected_event_display_name is None or \
+       selected_event_display_name.startswith("Invalid") or \
+       selected_event_display_name.startswith("Data Error") or \
+       selected_event_display_name == "Error in event display":
+        st.error("🚨 No valid event selected or selection error. Adjust filters or check data integrity. Consult logs.")
+        app_logger.error(f"No valid event selected. Selected display name: {selected_event_display_name}")
+        st.stop() # Stop further execution if no valid event
+
+    # Retrieve the selected event's data row
+    try:
+        selected_event_row = economic_df_filtered[economic_df_filtered['display_name'] == selected_event_display_name].iloc[0]
+        app_logger.info(f"Event selected: {selected_event_display_name}")
+    except IndexError:
+        st.error("🚨 Could not retrieve details for the selected event. It might have disappeared due to a filter change or data update. Please re-select.")
+        app_logger.error(f"IndexError retrieving selected event row for: {selected_event_display_name}. Filters might have changed.")
+        st.stop()
+
+
+    # Extract event details
+    # Use .get() with defaults to prevent KeyErrors if columns are missing
+    event_id_parts = [
+        str(selected_event_row.get('EventName', '')),
+        str(selected_event_row.get('Currency', '')),
+        str(selected_event_row.get('Timestamp', ''))
+    ]
+    event_id = "".join(filter(None, event_id_parts)) # Create a more robust ID
+    if not event_id: event_id = str(np.random.randint(100000)) # Fallback ID
+    app_logger.debug(f"Generated event_id: {event_id}")
+
+
+    prev_val = selected_event_row.get('Previous')
+    fcst_val = selected_event_row.get('Forecast')
+    act_val = selected_event_row.get('Actual')
+    evt_name = str(selected_event_row.get('EventName', 'N/A'))
+    cur_str = str(selected_event_row.get('Currency', 'N/A'))
+    imp_str = str(selected_event_row.get('Impact', 'N/A'))
+    evt_ts = selected_event_row.get('Timestamp') # This should be a datetime object
+    
+    fmt_evt_time = convert_and_format_time(evt_ts, st.session_state.selected_timezone)
+    indicator_props = get_indicator_properties(evt_name)
+    app_logger.debug(f"Indicator properties for '{evt_name}': {indicator_props}")
+
+    # Display Event Details Section
+    st.markdown('<div class="content-section">', unsafe_allow_html=True)
+    st.subheader(f"🔍 Details: {evt_name}")
+    det_cols = st.columns([1.5, 1.5, 1, 1, 1]) # Adjusted column ratios for better spacing
+    with det_cols[0]: st.metric(label="Currency Pair", value=f"{cur_str}/USD" if cur_str not in ["USD", "N/A", ""] else cur_str)
+    with det_cols[1]: st.metric(label="Impact Level", value=imp_str if pd.notna(imp_str) and imp_str else "N/A")
+    
+    time_p, date_p = "N/A", "N/A"
+    if fmt_evt_time not in ["N/A", "Invalid Time"] and ' ' in fmt_evt_time:
+        parts = fmt_evt_time.split(' ', 2) # Split max 2 times to get date, time, am/pm+zone
+        date_p = parts[0]
+        time_p = f"{parts[1]}"
+        if len(parts) > 2: # If AM/PM and Zone are present
+            time_p += f" {parts[2]}"
+            
+    with det_cols[2]: st.metric(label="Previous", value=f"{prev_val:.2f}" if pd.notna(prev_val) and isinstance(prev_val, (int, float)) else "N/A")
+    with det_cols[3]: st.metric(label="Forecast", value=f"{fcst_val:.2f}" if pd.notna(fcst_val) and isinstance(fcst_val, (int, float)) else "N/A")
+    with det_cols[4]: st.metric(label="Actual", value=f"{act_val:.2f}" if pd.notna(act_val) and isinstance(act_val, (int, float)) else "Pending")
+    st.caption(f"Scheduled: {date_p} at {time_p} ({st.session_state.selected_timezone})")
+    st.markdown('</div>', unsafe_allow_html=True) # Close content-section for details
+
+    # Baseline Interpretation Section
+    st.markdown('<div class="content-section">', unsafe_allow_html=True)
+    st.subheader("🎯 Baseline Interpretation")
+    inferred_bias = infer_market_outlook_from_data(prev_val, fcst_val, evt_name)
+    st.markdown(f"<div class='custom-info-box'>System-Inferred Bias (Forecast vs. Previous): <strong>{inferred_bias}</strong> for {cur_str}</div>", unsafe_allow_html=True)
+    
+    st.markdown("<h5>Desired Market Scenario Analysis (Baseline)</h5>", unsafe_allow_html=True)
+    outcome_opts = ["Bullish", "Bearish", "Consolidating"]
+    def_idx_outcome = 2 # Default to Consolidating
+    if inferred_bias and "qualitative" not in inferred_bias.lower() and "insufficient" not in inferred_bias.lower() and "invalid" not in inferred_bias.lower():
+        if "bullish" in inferred_bias.lower(): def_idx_outcome = 0
+        elif "bearish" in inferred_bias.lower(): def_idx_outcome = 1
+    
+    # Ensure unique key for radio button using event_id
+    desired_outcome = st.radio(
+        f"Select desired outcome for {cur_str}:",
+        options=outcome_opts,
+        index=def_idx_outcome,
+        key=f"outcome_radio_{event_id}", # Unique key
+        horizontal=True,
+        help="Choose the market direction for which you want a baseline scenario analysis."
+    )
+    app_logger.debug(f"Desired outcome selected: {desired_outcome} for event {event_id}")
+
+    prediction_pts = predict_actual_condition_for_outcome(prev_val, fcst_val, desired_outcome, cur_str, evt_name)
+    outcome_colors = {"Bullish": "#28a745", "Bearish": "#dc3545", "Consolidating": "#6c757d"}
+    box_color = outcome_colors.get(desired_outcome, "#6c757d") # Default color
+    pred_html_list = "".join([f"<li>{pt}</li>" for pt in prediction_pts])
+    st.markdown(f"<div class='custom-prediction-box' style='background-color: {box_color}1A; border-left: 5px solid {box_color}; color: #E0E0E0;'><ul style='margin-bottom:0; padding-left:20px;'>{pred_html_list}</ul></div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True) # Close content-section for baseline
+
+    # AI Sentiment Analysis for Qualitative Events
+    if indicator_props.get("type") == "qualitative":
+        st.markdown('<div class="content-section">', unsafe_allow_html=True)
+        st.subheader("🤖 AI Sentiment Analysis (Qualitative Event)")
+        st.markdown(f"Since **{evt_name}** is a qualitative event, its impact is driven by the perceived tone and message. Use the AI assistant below to explore potential interpretations based on a selected sentiment.")
+
+        qual_sentiment_options = ["Hawkish", "Neutral", "Dovish"]
+        user_qual_sentiment = st.radio(
+            "Select perceived sentiment:",
+            options=qual_sentiment_options,
+            index=1, # Default to Neutral
+            key=f"qual_sentiment_{event_id}", # Unique key
+            horizontal=True,
+            help="Indicate the perceived tone of the qualitative event for AI analysis."
+        )
+
+        if st.button("Analyze Qualitative Sentiment with AI", key=f"analyze_qual_ai_{event_id}", use_container_width=True):
+            app_logger.info(f"Initiating AI sentiment analysis for '{evt_name}' with sentiment '{user_qual_sentiment}'.")
+            with st.spinner(f"🧠 AI is analyzing '{evt_name}' with a '{user_qual_sentiment}' sentiment for {cur_str}..."):
+                event_desc_for_ai = indicator_props.get("description", "A significant qualitative economic event.")
+                try:
+                    ai_analysis_result = analyze_qualitative_event_llm(evt_name, user_qual_sentiment, cur_str, event_desc_for_ai)
+                    app_logger.info(f"AI analysis completed for '{evt_name}'. Confidence: {ai_analysis_result.get('confidence')}")
+                except Exception as e:
+                    app_logger.error(f"Error during AI qualitative analysis for '{evt_name}'.", exc_info=True)
+                    st.error(f"🚨 AI Analysis Failed: {e}")
+                    ai_analysis_result = {} # Ensure it's a dict to avoid .get errors
+
+            if ai_analysis_result: # Check if result is not empty
+                st.markdown(f"<h5>AI Analysis Result (Sentiment: {user_qual_sentiment})</h5>", unsafe_allow_html=True)
+                res_color = outcome_colors.get(user_qual_sentiment, "#6c757d") # Use existing map or default
+                if user_qual_sentiment == "Hawkish": res_color = outcome_colors["Bullish"]
+                elif user_qual_sentiment == "Dovish": res_color = outcome_colors["Bearish"]
+                
+                st.markdown(f"<div class='custom-info-box' style='border-left-color: {res_color};'><strong>Summary:</strong> {ai_analysis_result.get('summary', 'N/A')}</div>", unsafe_allow_html=True)
+                
+                cols_ai = st.columns(2)
+                with cols_ai[0]:
+                    st.markdown("**Potential Bullish Points:**")
+                    bullish_pts = ai_analysis_result.get("bullish_points", [])
+                    if bullish_pts: [st.markdown(f"- {pt}") for pt in bullish_pts]
+                    else: st.caption("N/A")
+                with cols_ai[1]:
+                    st.markdown("**Potential Bearish Points:**")
+                    bearish_pts = ai_analysis_result.get("bearish_points", [])
+                    if bearish_pts: [st.markdown(f"- {pt}") for pt in bearish_pts]
+                    else: st.caption("N/A")
+                
+                st.markdown("**Key Considerations & Factors:**")
+                key_considerations = ai_analysis_result.get("key_considerations", [])
+                if key_considerations: [st.markdown(f"- {pt}") for pt in key_considerations]
+                else: st.caption("N/A")
+
+                st.markdown(f"<div style='font-size:0.8rem;color:#A0A0A0;margin-top:10px;'><strong>Impact Scale:</strong> {ai_analysis_result.get('potential_impact','N/A')} | <strong>AI Confidence:</strong> {ai_analysis_result.get('confidence','N/A')}</div>", unsafe_allow_html=True)
+                st.caption(f"ℹ️ {ai_analysis_result.get('disclaimer', 'AI analysis is experimental and not financial advice.')}")
+            else:
+                st.warning("AI analysis did not return a result.")
+
+
+        st.markdown('</div>', unsafe_allow_html=True) # Close content-section for AI
+        
+    # Tabs for Historical Trends and Simulation
+    tab_hist_label = "📈 Historical Trends"
+    tab_sim_label = "🔬 Simulate Actual Release"
+    if indicator_props.get("type") == "qualitative":
+        tab_sim_label = "🔬 Numerical Simulation (N/A for Qualitative)"
+    
+    tab_hist, tab_sim = st.tabs([tab_hist_label, tab_sim_label])
+
+    with tab_hist:
+        st.markdown('<div class="content-section">', unsafe_allow_html=True) # Add section wrapper
+        st.subheader(f"Historical Trends for: {evt_name}")
+        app_logger.debug(f"Loading historical data for tab: {evt_name}")
+        
+        # Determine if Alpha Vantage is a likely source for this US indicator
+        is_av_source = False
+        if 'ALPHA_VANTAGE_API_KEY' in st.secrets:
+            # Simplified check based on common AV indicators
+            av_indicator_keywords = ["Non-Farm", "Unemployment", "CPI", "Retail Sales", "GDP", "Federal Funds"]
+            if any(keyword.lower() in evt_name.lower() for keyword in av_indicator_keywords) and \
+               (cur_str == "USD" or not cur_str or cur_str == "N/A"): # AV mostly US data
+                is_av_source = True
+        
+        df_hist = load_historical_data(evt_name) # This now tries AV, then yfinance, then samples
+        
+        if not df_hist.empty:
+            cap_txt = f"Displaying historical data for {evt_name}. "
+            # Source attribution could be more dynamic if load_historical_data returned source
+            if is_av_source and 'Forecast' not in df_hist.columns and 'Previous' not in df_hist.columns:
+                 cap_txt += "Likely sourced from Alpha Vantage (US Data - 'Actual' values). Forecast/Previous may not be available from this source."
+            elif not df_hist[['Actual', 'Forecast', 'Previous']].dropna(how='all', axis=1).empty: # Check if any of these cols have data
+                 cap_txt += "Data may be from yfinance, Alpha Vantage, or sample series."
+            else:
+                 cap_txt += "Sample data may be shown if live sources are unavailable or lack all fields."
+            st.caption(cap_txt)
+            plot_historical_trend(df_hist, evt_name, indicator_props.get("type", "normal"))
+        else:
+            st.info(f"ℹ️ No historical data found or able to be plotted for '{evt_name}'. This could be due to data source limitations or the nature of the event.")
+            app_logger.info(f"No historical data to plot for '{evt_name}'.")
+        st.markdown('</div>', unsafe_allow_html=True) # Close section wrapper
+
+    with tab_sim:
+        st.markdown('<div class="content-section">', unsafe_allow_html=True) # Add section wrapper
+        st.subheader(f"Simulate Actual Release Impact for: {evt_name}")
+        if indicator_props.get("type") == "qualitative":
+            st.info(f"ℹ️ Numerical simulation is not applicable for purely qualitative events like '{evt_name}'. Use the AI Sentiment Analysis tab.")
+        else:
+            st.markdown("Enter a hypothetical 'Actual' value to see its classified impact on currency sentiment.")
+            unit_sim = indicator_props.get("unit","")
+            # Determine step size based on unit or typical values for the indicator
+            if "%" in unit_sim: step_v = 0.1
+            elif "K" in unit_sim.upper() or "M" in unit_sim.upper() or "B" in unit_sim.upper(): step_v = 1.0 if pd.isna(fcst_val) or abs(fcst_val) < 10 else 10.0
+            elif pd.notna(fcst_val) and abs(fcst_val) < 1: step_v = 0.01
+            elif pd.notna(fcst_val) and abs(fcst_val) < 10: step_v = 0.1
+            else: step_v = 0.1 # Default step
+
+            actual_in_def = fcst_val if pd.notna(fcst_val) and isinstance(fcst_val, (int,float)) else \
+                            (prev_val if pd.notna(prev_val) and isinstance(prev_val, (int,float)) else 0.0)
+            
+            hyp_actual = st.number_input(
+                f"Hypothetical 'Actual' ({unit_sim}):",
+                value=float(actual_in_def), # Ensure float for number_input
+                step=float(step_v),
+                format="%.2f" if "%" in unit_sim or (pd.notna(fcst_val) and abs(fcst_val) < 10 and abs(fcst_val) != 0) else "%.1f", # Dynamic format
+                key=f"actual_input_{event_id}", # Unique key
+                help=f"Enter a hypothetical 'Actual' release value for {evt_name} to simulate its impact."
+            )
+
+            if st.button("Classify Hypothetical Actual", key=f"classify_btn_{event_id}", use_container_width=True):
+                app_logger.info(f"Classifying hypothetical actual: {hyp_actual} for event '{evt_name}'.")
+                classification, explanation = classify_actual_release(hyp_actual, fcst_val, prev_val, evt_name, cur_str)
+                
+                # Define colors for classification outcomes
+                nu_colors = {
+                    "Strongly Bullish":"#145A32", "Mildly Bullish":"#27AE60",
+                    "Neutral/In-Line":"#808B96",
+                    "Mildly Bearish":"#E74C3C", "Strongly Bearish":"#922B21",
+                    "Qualitative":"#2E4053", "Indeterminate":"#4A235A", "Error":"#641E16"
+                }
+                cls_bg_color = nu_colors.get(classification, "#333333") # Default color
+
+                st.markdown(f"**Classification:** <span style='background-color:{cls_bg_color};color:white;padding:3px 7px;border-radius:4px;font-weight:bold;'>{classification}</span>", unsafe_allow_html=True)
+                st.markdown(f"<div class='custom-classification-box' style='border-color:{cls_bg_color};background-color:#1c1e22;'>{explanation}</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True) # Close section wrapper
+
+    # Full Economic Calendar Overview (Filtered) Expander
+    st.markdown("---")
+    with st.expander("🗓️ Full Economic Calendar Overview (Filtered)", expanded=False):
+        if not economic_df_filtered.empty:
+            cal_df = economic_df_filtered.copy()
+            # Ensure Timestamp column exists and is datetime
+            if 'Timestamp' in cal_df.columns and pd.api.types.is_datetime64_any_dtype(cal_df['Timestamp']):
+                cal_df['FormattedTimestamp'] = cal_df['Timestamp'].apply(
+                    lambda x: convert_and_format_time(x, st.session_state.selected_timezone, fmt="%Y-%m-%d %I:%M %p")
+                )
+                # Select and order columns for display
+                display_cols = ['FormattedTimestamp','Currency','Impact','EventName','Previous','Forecast','Actual','Zone']
+                # Filter out columns not present in cal_df to prevent KeyErrors
+                cols_to_display = [col for col in display_cols if col in cal_df.columns]
+                cal_df_display = cal_df[cols_to_display]
+                cal_df_display = cal_df_display.rename(columns={'FormattedTimestamp':'Time','EventName':'Event Name','Currency':'Ccy'})
+            else:
+                app_logger.warning("Timestamp issue in filtered calendar view. Displaying with errors.")
+                cal_df_display = pd.DataFrame({ # Create a fallback structure
+                    'Time': ["Data Error"] * len(cal_df),
+                    'Event Name': cal_df.get('EventName', pd.Series(["N/A"] * len(cal_df))),
+                    'Ccy': cal_df.get('Currency', pd.Series(["N/A"] * len(cal_df)))
+                })
+
+
+            st.dataframe(
+                cal_df_display.sort_values(by='Time'), # Sort by the formatted time string
+                use_container_width=True,
+                hide_index=True,
+                height=450,
+                column_config={
+                    "Time": st.column_config.TextColumn("Time", width="medium", help="Scheduled time in selected timezone"),
+                    "Ccy": st.column_config.TextColumn("Ccy", width="small", help="Currency"),
+                    "Impact": st.column_config.TextColumn("Impact", width="small", help="Impact level"),
+                    "Event Name": st.column_config.TextColumn("Event", width="large", help="Name of the economic event"),
+                    "Previous": st.column_config.NumberColumn("Prev.", format="%.2f", width="small", help="Previous value"),
+                    "Forecast": st.column_config.NumberColumn("Fcst.", format="%.2f", width="small", help="Forecast value"),
+                    "Actual": st.column_config.NumberColumn("Actual", format="%.2f", width="small", help="Actual released value (if available)"),
+                    "Zone": st.column_config.TextColumn("Zone", width="small", help="Geographic zone of the event")
+                }
+            )
+        else:
+            st.info("ℹ️ No events to display in calendar based on current filters.")
+
+# Footer
+st.markdown("---")
+st.caption("Trading Mastery Hub © 2024-2025 | Disclaimer: Generalized interpretations, not financial advice. Data accuracy depends on sources and is not guaranteed. Always conduct your own research.")
+app_logger.info("Application rendering complete.")
+
